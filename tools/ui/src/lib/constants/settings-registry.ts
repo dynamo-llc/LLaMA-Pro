@@ -774,7 +774,106 @@ const NON_UI_SETTINGS: SettingsEntry[] = [
 		key: SETTINGS_KEYS.MCP_SERVERS,
 		label: 'MCP servers',
 		help: 'Configure MCP servers as a JSON list. Use the form in the MCP Client settings section to edit.',
-		defaultValue: '[]',
+		defaultValue: JSON.stringify([
+			{
+				id: 'preset-sqlite',
+				name: 'SQLite Database',
+				url: 'http://localhost:8030/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-filesystem',
+				name: 'Filesystem',
+				url: 'http://localhost:8003/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-fetch',
+				name: 'Fetch Web Page',
+				url: 'http://localhost:8005/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-puppeteer',
+				name: 'Puppeteer Browser',
+				url: 'http://localhost:8006/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-ghidra',
+				name: 'Ghidra (Headless)',
+				url: 'http://localhost:8081/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-ida',
+				name: 'IDA Pro',
+				url: 'http://localhost:8082/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-figma',
+				name: 'Figma',
+				url: 'http://localhost:8013/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30,
+				headers: '{\n  "Figma-Token": "YOUR_FIGMA_PERSONAL_ACCESS_TOKEN"\n}'
+			},
+			{
+				id: 'preset-playwright',
+				name: 'Playwright',
+				url: 'http://localhost:8015/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-github',
+				name: 'GitHub',
+				url: 'http://localhost:8017/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30,
+				headers: '{\n  "Authorization": "token YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"\n}'
+			},
+			{
+				id: 'preset-browsertools',
+				name: 'Chrome DevTools (Browsertools)',
+				url: 'http://localhost:8019/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-memory',
+				name: 'Memory',
+				url: 'http://localhost:8021/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			},
+			{
+				id: 'preset-postgres',
+				name: 'PostgreSQL',
+				url: 'http://localhost:8023/sse',
+				enabled: true,
+				useProxy: true,
+				requestTimeoutSeconds: 30
+			}
+		]),
 		type: SettingsFieldType.INPUT,
 		sync: { serverKey: SETTINGS_KEYS.MCP_SERVERS, paramType: SyncableParameterType.STRING }
 	}

@@ -129,6 +129,49 @@ class SettingsStore {
 				...savedVal
 			};
 
+			// Migrate/initialize MCP presets if not done yet
+			const presetsInitialized = localStorage.getItem('mcpPresetsInitialized');
+			if (presetsInitialized !== 'v6') {
+				try {
+					let currentServers: any[] = [];
+					const mcpServersValue = this.config[SETTINGS_KEYS.MCP_SERVERS];
+					if (mcpServersValue && mcpServersValue.trim() !== '' && mcpServersValue.trim() !== '[]') {
+						currentServers = JSON.parse(mcpServersValue);
+					}
+
+					const defaultServers = JSON.parse(
+						SETTING_CONFIG_DEFAULT[SETTINGS_KEYS.MCP_SERVERS] as string
+					);
+
+					// Replace 'localhost' with '127.0.0.1' for all servers to resolve IPv6 loopback issues on Windows
+					let modified = false;
+					for (const server of currentServers) {
+						if (server.url && server.url.includes('http://localhost:')) {
+							server.url = server.url.replace('http://localhost:', 'http://127.0.0.1:');
+							modified = true;
+						}
+					}
+
+					// Add default servers that aren't already present in currentServers
+					for (const defServer of defaultServers) {
+						if (
+							!currentServers.some((s: any) => s.name === defServer.name || s.url === defServer.url)
+						) {
+							currentServers.push(defServer);
+							modified = true;
+						}
+					}
+
+					if (modified || !mcpServersValue || mcpServersValue.trim() === '[]') {
+						this.config[SETTINGS_KEYS.MCP_SERVERS] = JSON.stringify(currentServers);
+						this.saveConfig();
+					}
+				} catch (e) {
+					console.error('Failed to migrate MCP servers:', e);
+				}
+				localStorage.setItem('mcpPresetsInitialized', 'v6');
+			}
+
 			// Default sendOnEnter to false on mobile when the user has no saved preference
 			if (!(SETTINGS_KEYS.SEND_ON_ENTER in savedVal)) {
 				if (isMobile.current) {

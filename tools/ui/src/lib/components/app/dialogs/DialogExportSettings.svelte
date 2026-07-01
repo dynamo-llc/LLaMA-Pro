@@ -37,7 +37,7 @@
 
 			<AlertDialog.Description>
 				{#if includeSensitiveData}
-					<p class="text-amber-500">
+					<p class="text-neutral-600 dark:text-neutral-400 font-medium">
 						Warning: This export will include sensitive data such as API keys and MCP server custom
 						headers (e.g., authorization tokens). Do not share this file with anyone you don't
 						trust.

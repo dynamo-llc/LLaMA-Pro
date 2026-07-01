@@ -23,10 +23,6 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Error {status} - {APP_NAME}</title>
-</svelte:head>
-
 {#if isApiKeyError}
 	<ServerErrorSplash
 		error={error?.message || 'Access denied - check server permissions'}

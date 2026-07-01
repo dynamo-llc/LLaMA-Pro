@@ -22,7 +22,7 @@
 		class={[
 			'md:h-8 md:w-8 h-9 w-9 rounded-full p-0',
 			showErrorState &&
-				'bg-red-400/10 text-red-400 hover:bg-red-400/20 hover:text-red-400 disabled:opacity-100'
+				'bg-neutral-400/10 text-neutral-500 hover:bg-neutral-400/20 hover:text-neutral-500 disabled:opacity-100'
 		]}
 		{...props}
 	>

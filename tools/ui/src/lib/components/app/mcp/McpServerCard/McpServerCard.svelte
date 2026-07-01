@@ -67,7 +67,12 @@
 	async function startEditing() {
 		isEditing = true;
 		await tick();
-		editFormRef?.setInitialValues(server.url, server.headers || '', server.useProxy || false);
+		editFormRef?.setInitialValues(
+			server.url,
+			server.headers || '',
+			server.useProxy || false,
+			server.name || ''
+		);
 	}
 
 	function cancelEditing() {
@@ -78,11 +83,12 @@
 		}
 	}
 
-	function saveEditing(url: string, headers: string, useProxy: boolean) {
+	function saveEditing(url: string, headers: string, useProxy: boolean, name?: string) {
 		onUpdate({
 			url: url,
 			headers: headers || undefined,
-			useProxy: useProxy
+			useProxy: useProxy,
+			name: name || undefined
 		});
 		isEditing = false;
 
@@ -102,6 +108,7 @@
 			bind:this={editFormRef}
 			serverId={server.id}
 			serverUrl={server.url}
+			serverName={server.name}
 			serverUseProxy={server.useProxy}
 			onSave={saveEditing}
 			onCancel={cancelEditing}
@@ -111,7 +118,7 @@
 			{displayName}
 			{faviconUrl}
 			enabled={enabled ?? server.enabled}
-			disabled={isError}
+			disabled={isHealthChecking}
 			{onToggle}
 			{serverInfo}
 			{capabilities}

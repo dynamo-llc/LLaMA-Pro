@@ -61,10 +61,17 @@ export class ModelsService {
 	 * @param extraArgs - Optional additional arguments to pass to the model instance
 	 * @returns Load response from the server
 	 */
-	static async load(modelId: string, extraArgs?: string[]): Promise<ApiRouterModelsLoadResponse> {
-		const payload: { model: string; extra_args?: string[] } = { model: modelId };
+	static async load(
+		modelId: string,
+		extraArgs?: string[],
+		rpcEndpoint?: string
+	): Promise<ApiRouterModelsLoadResponse> {
+		const payload: { model: string; extra_args?: string[]; rpc?: string } = { model: modelId };
 		if (extraArgs && extraArgs.length > 0) {
 			payload.extra_args = extraArgs;
+		}
+		if (rpcEndpoint) {
+			payload.rpc = rpcEndpoint;
 		}
 
 		return apiPost<ApiRouterModelsLoadResponse>(API_MODELS.LOAD, payload);

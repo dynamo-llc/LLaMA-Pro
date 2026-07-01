@@ -52,6 +52,7 @@ class ModelsStore {
 	error = $state<string | null>(null);
 	selectedModelId = $state<string | null>(null);
 	selectedModelName = $state<string | null>(null);
+	activeRpcPeers = $state<{ id: string; name: string; endpoint: string }[]>([]);
 
 	// Dedup concurrent fetch() callers — all awaiters share the same inflight promise.
 	// Without this, ?model=<name> URL handler races an in-progress fetch and sees an empty list.
@@ -333,7 +334,10 @@ class ModelsStore {
 			if (router) {
 				const response = await ModelsService.listRouter();
 
-				this.routerModels = response.data;
+				const filteredData = response.data.filter((m: any) => !m.id.startsWith('ggml-vocab-'));
+				response.data = filteredData;
+
+				this.routerModels = filteredData;
 				this.models = this.buildModelOptions(response);
 
 				await this.fetchModalitiesForLoadedModels();
@@ -403,7 +407,7 @@ class ModelsStore {
 
 		try {
 			const response = await ModelsService.listRouter();
-			this.routerModels = response.data;
+			this.routerModels = response.data.filter((m: any) => !m.id.startsWith('ggml-vocab-'));
 			await this.fetchModalitiesForLoadedModels();
 
 			const visible = this.getVisibleModels();
@@ -784,7 +788,7 @@ class ModelsStore {
 		this.setRouterModelStatus(model, status);
 
 		if (status === ServerModelStatus.LOADING) {
-			if (data.progress) this.loadProgress.set(model, data.progress);
+			if (data.progress !== undefined) this.loadProgress.set(model, data.progress);
 		} else {
 			this.loadProgress.delete(model);
 		}
@@ -811,9 +815,15 @@ class ModelsStore {
 	private removeRouterModel(modelId: string): void {
 		if (this.routerModels.findIndex((m) => m.id === modelId) === -1) return;
 
-		this.routerModels = this.routerModels.filter((m) => m.id !== modelId);
+		this.routerModels = this.routerModels.filter((m: any) => m.id !== modelId);
 		this.loadProgress.delete(modelId);
-		this.rejectStatus(modelId, new Error(`Model removed: ${this.toDisplayName(modelId)}`));
+
+		const waiter = this.statusWaiters.get(modelId);
+		if (waiter?.target === ServerModelStatus.UNLOADED) {
+			this.settleStatus(modelId, ServerModelStatus.UNLOADED);
+		} else {
+			this.rejectStatus(modelId, new Error(`Model removed: ${this.toDisplayName(modelId)}`));
+		}
 	}
 
 	/**
@@ -877,7 +887,8 @@ class ModelsStore {
 		reachedLoaded.catch(() => {});
 
 		try {
-			await ModelsService.load(modelId);
+			const rpcEndpoints = this.activeRpcPeers.map((p) => p.endpoint).join(',');
+			await ModelsService.load(modelId, undefined, rpcEndpoints || undefined);
 			await reachedLoaded;
 			toast.success(`Model loaded: ${this.toDisplayName(modelId)}`);
 		} catch (error) {

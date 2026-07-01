@@ -98,6 +98,8 @@ export interface ApiModelDataEntry {
 	aliases?: string[];
 	/** Informational tags for this model */
 	tags?: string[];
+	/** Size of local model file in bytes */
+	size_bytes?: number;
 	/** Legacy meta field (may be present in older responses) */
 	meta?: Record<string, unknown> | null;
 }
@@ -252,6 +254,14 @@ export interface ApiLlamaCppServerProps {
 	webui_settings?: Record<string, string | number | boolean>;
 	ui_settings?: Record<string, string | number | boolean>;
 	cors_proxy_enabled?: boolean;
+	system_ram?: {
+		total: number;
+		free: number;
+	};
+	vram?: {
+		total: number;
+		free: number;
+	};
 }
 
 export interface ApiChatCompletionRequest {

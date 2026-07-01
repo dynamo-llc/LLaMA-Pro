@@ -667,12 +667,26 @@ export class MCPService {
 			this.createLog(MCPConnectionPhase.INITIALIZING, 'Sending initialize request...')
 		);
 
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
 		try {
-			await client.connect(transport);
+			await Promise.race([
+				client.connect(transport),
+				new Promise<never>((_, reject) => {
+					timeoutId = setTimeout(() => {
+						reject(new Error(`Connection timed out after ${serverConfig.handshakeTimeoutMs}ms`));
+					}, serverConfig.handshakeTimeoutMs);
+				})
+			]);
 			// Transport diagnostics are only for the initial handshake, not long-lived traffic.
 			stopPhaseLogging();
 			client.onerror = runtimeErrorHandler;
 		} catch (error) {
+			try {
+				await transport.close();
+			} catch (cleanupError) {
+				// Ignore errors during cleanup
+			}
+
 			client.onerror = runtimeErrorHandler;
 			const url =
 				(serverConfig.useProxy ?? false)
@@ -709,6 +723,10 @@ export class MCPService {
 			);
 
 			throw error;
+		} finally {
+			if (timeoutId !== undefined) {
+				clearTimeout(timeoutId);
+			}
 		}
 
 		const serverVersion = client.getServerVersion();

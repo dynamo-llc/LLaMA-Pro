@@ -82,12 +82,12 @@
 				<DropdownMenu.Trigger
 					class={[
 						'flex h-6 w-6 cursor-pointer items-center justify-center rounded-full p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-						thinkingEnabled ? 'bg-amber-400/10 hover:bg-amber-400/20' : 'bg-muted'
+						thinkingEnabled ? 'bg-neutral-200 dark:bg-neutral-800' : 'bg-muted'
 					]}
 					aria-label={`${tooltipText}. Click to configure.`}
 				>
 					{#if thinkingEnabled}
-						<Lightbulb class="h-3 w-3 text-amber-400" />
+						<Lightbulb class="h-3 w-3 text-neutral-600 dark:text-neutral-400" />
 					{:else}
 						<LightbulbOff class="h-3 w-3 text-muted-foreground" />
 					{/if}

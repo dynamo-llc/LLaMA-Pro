@@ -75,7 +75,7 @@
 			class="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors outline-none hover:bg-accent focus:bg-accent"
 		>
 			{#if thinkingEnabled}
-				<Lightbulb class="h-4 w-4 shrink-0 text-amber-400" />
+				<Lightbulb class="h-4 w-4 shrink-0 text-neutral-500" />
 			{:else}
 				<LightbulbOff class="h-4 w-4 shrink-0 text-muted-foreground" />
 			{/if}

@@ -24,6 +24,15 @@
 static std::function<void(int)> shutdown_handler;
 static std::atomic_flag is_terminating = ATOMIC_FLAG_INIT;
 
+// App telemetry globals
+static std::atomic<uint64_t> g_requests_routed{0};
+static std::atomic<uint64_t> g_requests_success{0};
+static std::atomic<uint64_t> g_requests_latency_ms{0};
+// Inference-only counters (completions/responses/messages endpoints only)
+static std::atomic<uint64_t> g_infer_routed{0};
+static std::atomic<uint64_t> g_infer_success{0};
+static std::atomic<int32_t> g_infer_processing{0};
+
 static inline void signal_handler(int signal) {
     if (is_terminating.test_and_set()) {
         // in case it hangs, we can force terminate the server by hitting Ctrl+C twice
@@ -39,10 +48,19 @@ static inline void signal_handler(int signal) {
 // this is to make sure handler_t never throws exceptions; instead, it returns an error response
 static server_http_context::handler_t ex_wrapper(server_http_context::handler_t func) {
     return [func = std::move(func)](const server_http_req & req) -> server_http_res_ptr {
+        auto t_start = std::chrono::high_resolution_clock::now();
+        g_requests_routed++;
+        
         std::string message;
         error_type error;
         try {
-            return func(req);
+            auto res = func(req);
+            auto t_end = std::chrono::high_resolution_clock::now();
+            g_requests_latency_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+            if (res->status >= 200 && res->status < 300) {
+                g_requests_success++;
+            }
+            return res;
         } catch (const std::invalid_argument & e) {
             // treat invalid_argument as invalid request (400)
             error = ERROR_TYPE_INVALID_REQUEST;
@@ -67,6 +85,87 @@ static server_http_context::handler_t ex_wrapper(server_http_context::handler_t 
             SRV_ERR("got another exception: %s | while handling exception: %s\n", e.what(), message.c_str());
             res->data = "Internal Server Error";
         }
+        
+        auto t_end = std::chrono::high_resolution_clock::now();
+        g_requests_latency_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+        return res;
+    };
+}
+
+// Guard to decrement inference processing counter on destruction
+struct infer_guard {
+    infer_guard() {
+        g_infer_processing++;
+    }
+    ~infer_guard() {
+        g_infer_processing--;
+    }
+};
+
+struct server_http_res_tracked : server_http_res {
+    server_http_res_ptr orig;
+    std::shared_ptr<infer_guard> guard;
+    server_http_res_tracked(server_http_res_ptr orig, std::shared_ptr<infer_guard> guard)
+        : orig(std::move(orig)), guard(guard) {
+        content_type = this->orig->content_type;
+        status = this->orig->status;
+        data = this->orig->data;
+        headers = this->orig->headers;
+        
+        if (this->orig->next) {
+            // Keep guard alive inside the streaming lambda as well
+            next = [orig_next = this->orig->next, guard](std::string & chunk) -> bool {
+                return orig_next(chunk);
+            };
+        }
+    }
+};
+
+// inference wrapper: same as ex_wrapper but also increments inference-only counters
+// use this only for completion/response/message endpoints that produce tokens
+static server_http_context::handler_t infer_wrapper(server_http_context::handler_t func) {
+    return [func = std::move(func)](const server_http_req & req) -> server_http_res_ptr {
+        auto t_start = std::chrono::high_resolution_clock::now();
+        g_requests_routed++;
+        g_infer_routed++;
+
+        std::string message;
+        error_type error;
+        try {
+            auto guard = std::make_shared<infer_guard>();
+            auto res = func(req);
+            auto t_end = std::chrono::high_resolution_clock::now();
+            g_requests_latency_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+            if (res->status >= 200 && res->status < 300) {
+                g_requests_success++;
+                g_infer_success++;
+            }
+            return std::make_unique<server_http_res_tracked>(std::move(res), guard);
+        } catch (const std::invalid_argument & e) {
+            error = ERROR_TYPE_INVALID_REQUEST;
+            message = e.what();
+        } catch (const std::exception & e) {
+            error = ERROR_TYPE_SERVER;
+            message = e.what();
+        } catch (...) {
+            error = ERROR_TYPE_SERVER;
+            message = "unknown error";
+        }
+
+        auto res = std::make_unique<server_http_res>();
+        res->status = 500;
+        try {
+            json error_data = format_error_response(message, error);
+            res->status = json_value(error_data, "code", 500);
+            res->data = safe_json_to_str({{ "error", error_data }});
+            SRV_WRN("got exception: %s\n", res->data.c_str());
+        } catch (const std::exception & e) {
+            SRV_ERR("got another exception: %s | while handling exception: %s\n", e.what(), message.c_str());
+            res->data = "Internal Server Error";
+        }
+
+        auto t_end = std::chrono::high_resolution_clock::now();
+        g_requests_latency_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
         return res;
     };
 }
@@ -81,6 +180,7 @@ int llama_server(int argc, char ** argv) {
     common_params params;
 
     common_init();
+    common_log_set_file(common_log_main(), "server.log");
 
     if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_SERVER)) {
         return 1;
@@ -166,6 +266,8 @@ int llama_server(int argc, char ** argv) {
         routes.post_completions            = models_routes->proxy_post;
         routes.post_completions_oai        = models_routes->proxy_post;
         routes.post_chat_completions       = models_routes->proxy_post;
+        routes.post_orchestra_chat_completions = models_routes->proxy_post;
+        routes.post_swarm_chat_completions     = models_routes->proxy_post;
         routes.post_control                = models_routes->proxy_post;
         routes.post_responses_oai          = models_routes->proxy_post;
         routes.post_transcriptions_oai     = models_routes->proxy_post;
@@ -194,20 +296,83 @@ int llama_server(int argc, char ** argv) {
         ctx_http.post("/models/unload",        ex_wrapper(models_routes->post_router_models_unload));
         ctx_http.get ("/models/sse",           ex_wrapper(models_routes->get_router_models_sse));
         ctx_http.del ("/models",               ex_wrapper(models_routes->del_router_models));
-    }
+        ctx_http.get ("/models/cache-dir",     ex_wrapper(models_routes->get_router_models_cache_dir));
+        ctx_http.post("/models/cache-dir",     ex_wrapper(models_routes->post_router_models_cache_dir));
+        ctx_http.post("/models/update-ide",    ex_wrapper(models_routes->post_router_models_update_ide));
 
+        // proxy provider /api endpoints to orchestrator on port 8000
+        auto proxy_to_orchestrator = [params](const std::string & method, const server_http_req & req) -> server_http_res_ptr {
+            std::string proxy_path = req.path;
+            if (!req.query_string.empty()) {
+                proxy_path += '?' + req.query_string;
+            }
+            return std::make_unique<server_http_proxy>(
+                method,
+                "http",
+                "127.0.0.1",
+                8000,
+                proxy_path,
+                req.headers,
+                req.body,
+                req.files,
+                req.should_stop,
+                params.timeout_read,
+                params.timeout_write
+            );
+        };
+
+        ctx_http.get ("/api/providers",        ex_wrapper([proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("GET", req); }));
+        ctx_http.post("/api/providers",        ex_wrapper([proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); }));
+        ctx_http.del ("/api/providers/:id",    ex_wrapper([proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("DELETE", req); }));
+        ctx_http.get ("/api/providers/models", ex_wrapper([proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("GET", req); }));
+
+        routes.post_orchestra_chat_completions = [proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); };
+        routes.post_swarm_chat_completions     = [proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); };
+    }
     ctx_http.get ("/health",                   ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/v1/health",                ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/metrics",                  ex_wrapper(routes.get_metrics));
+    ctx_http.get ("/telemetry/app",            [](const server_http_req &) -> server_http_res_ptr {
+        auto res = std::make_unique<server_http_res>();
+        json data = {
+            {"requestsRouted",  g_requests_routed.load()},
+            {"requestsSuccess", g_requests_success.load()},
+            {"latencyMs",       g_requests_latency_ms.load()},
+            {"inferRouted",     g_infer_routed.load()},
+            {"inferSuccess",    g_infer_success.load()},
+            {"inferProcessing", g_infer_processing.load()}
+        };
+        res->data = data.dump();
+        return res;
+    });
+    ctx_http.get ("/telemetry/sysinfo",        [](const server_http_req &) -> server_http_res_ptr {
+        static std::string last_sysinfo = "{}";
+        auto res = std::make_unique<server_http_res>();
+        
+        const char* temp_dir = std::getenv("TEMP");
+        std::string sysinfo_path = temp_dir ? std::string(temp_dir) + "\\llama_sysinfo.json" : "sysinfo.json";
+        std::ifstream file(sysinfo_path);
+        if (file.is_open()) {
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            last_sysinfo = buffer.str();
+        }
+        res->data = last_sysinfo;
+        return res;
+    });
     ctx_http.get ("/props",                    ex_wrapper(routes.get_props));
     ctx_http.post("/props",                    ex_wrapper(routes.post_props));
     ctx_http.get ("/models",                   ex_wrapper(routes.get_models)); // public endpoint (no API key check)
     ctx_http.get ("/v1/models",                ex_wrapper(routes.get_models)); // public endpoint (no API key check)
-    ctx_http.post("/completion",               ex_wrapper(routes.post_completions)); // legacy
-    ctx_http.post("/completions",              ex_wrapper(routes.post_completions));
-    ctx_http.post("/v1/completions",           ex_wrapper(routes.post_completions_oai));
-    ctx_http.post("/chat/completions",         ex_wrapper(routes.post_chat_completions));
-    ctx_http.post("/v1/chat/completions",      ex_wrapper(routes.post_chat_completions));
+    ctx_http.post("/completion",               infer_wrapper(routes.post_completions)); // legacy
+    ctx_http.post("/completions",              infer_wrapper(routes.post_completions));
+    ctx_http.post("/v1/completions",           infer_wrapper(routes.post_completions_oai));
+    ctx_http.post("/chat/completions",         infer_wrapper(routes.post_chat_completions));
+    ctx_http.post("/v1/chat/completions",      infer_wrapper(routes.post_chat_completions));
+    ctx_http.post("/v1/orchestra",                  infer_wrapper(routes.post_orchestra_chat_completions));
+    ctx_http.post("/v1/orchestra/chat/completions", infer_wrapper(routes.post_orchestra_chat_completions));
+    ctx_http.post("/v1/swarm",                      infer_wrapper(routes.post_swarm_chat_completions));
+    ctx_http.post("/v1/swarm/chat/completions",     infer_wrapper(routes.post_swarm_chat_completions));
     ctx_http.post("/v1/chat/completions/control", ex_wrapper(routes.post_control));
     ctx_http.post("/v1/responses",             ex_wrapper(routes.post_responses_oai));
     ctx_http.post("/responses",                ex_wrapper(routes.post_responses_oai));

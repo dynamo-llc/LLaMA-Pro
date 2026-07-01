@@ -153,3 +153,28 @@ a.out.*
 
 AGENTS.local.md
 .pi/SYSTEM.md
+
+# Custom project ignores
+LHM.zip
+vendor/
+diff.txt
+metrics.txt
+help.txt
+temp_log.txt
+kwargs.json
+out.json
+sysinfo.json
+resize.ps1
+gather_sysinfo.ps1
+
+
+# Nested build and packaging ignores
+tools/orchestrator/build/
+tools/desktop/dist/
+node_modules/
+*.pkg
+*.pyz
+*.asar
+/scratch/
+check_db.py
+

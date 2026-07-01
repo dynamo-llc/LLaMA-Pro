@@ -27,7 +27,7 @@
 		<Tooltip.Trigger>
 			<Button
 				class="h-8 w-8 rounded-full p-0 {isRecording
-					? 'animate-pulse bg-red-500 text-white hover:bg-red-600'
+					? 'animate-pulse bg-neutral-600 text-white hover:bg-neutral-700'
 					: ''}"
 				disabled={disabled || isLoading || !hasAudioModality}
 				onclick={onMicClick}

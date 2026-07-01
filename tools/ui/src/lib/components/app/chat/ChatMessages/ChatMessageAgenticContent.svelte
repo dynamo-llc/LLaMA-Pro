@@ -230,7 +230,7 @@
 					</div>
 				{:else}
 					<div
-						class="rounded bg-yellow-500/10 p-2 text-xs text-yellow-600 italic dark:text-yellow-400"
+						class="rounded bg-neutral-500/10 p-2 text-xs text-neutral-600 italic dark:text-neutral-400"
 					>
 						Response was truncated
 					</div>

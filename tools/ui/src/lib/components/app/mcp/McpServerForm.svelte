@@ -10,9 +10,11 @@
 	import { CLI_FLAGS } from '$lib/constants';
 
 	interface Props {
+		name?: string;
 		url: string;
 		headers: string;
 		useProxy?: boolean;
+		onNameChange?: (name: string) => void;
 		onUrlChange: (url: string) => void;
 		onHeadersChange: (headers: string) => void;
 		onUseProxyChange?: (useProxy: boolean) => void;
@@ -21,9 +23,11 @@
 	}
 
 	let {
+		name = '',
 		url,
 		headers,
 		useProxy = false,
+		onNameChange,
 		onUrlChange,
 		onHeadersChange,
 		onUseProxyChange,
@@ -45,6 +49,22 @@
 </script>
 
 <div class="grid gap-3">
+	{#if onNameChange}
+		<div>
+			<label for="server-name-{id}" class="mb-2 block text-xs font-medium">
+				Server Name <span class="text-muted-foreground">(optional)</span>
+			</label>
+
+			<Input
+				id="server-name-{id}"
+				type="text"
+				placeholder="e.g. SQLite, Brave Search"
+				value={name}
+				oninput={(e) => onNameChange(e.currentTarget.value)}
+			/>
+		</div>
+	{/if}
+
 	<div>
 		<label for="server-url-{id}" class="mb-2 block text-xs font-medium">
 			Server URL <span class="text-destructive">*</span>

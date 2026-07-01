@@ -115,7 +115,7 @@
 					<Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
 				</div>
 			{:else if error}
-				<div class="flex flex-col items-center justify-center gap-2 py-8 text-red-500">
+				<div class="flex flex-col items-center justify-center gap-2 py-8 text-neutral-500">
 					<AlertCircle class="h-6 w-6" />
 
 					<span class="text-sm">{error}</span>

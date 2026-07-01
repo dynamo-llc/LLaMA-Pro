@@ -17,7 +17,8 @@ export enum ServerModelStatus {
 	LOADING = 'loading',
 	LOADED = 'loaded',
 	SLEEPING = 'sleeping',
-	FAILED = 'failed'
+	FAILED = 'failed',
+	DOWNLOADING = 'downloading'
 }
 
 /**

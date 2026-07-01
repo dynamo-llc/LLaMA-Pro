@@ -81,10 +81,6 @@
 	});
 </script>
 
-<svelte:head>
-	<title>{APP_NAME}</title>
-</svelte:head>
-
 <DialogModelNotAvailable
 	bind:open={showModelNotAvailable}
 	modelName={requestedModelName}

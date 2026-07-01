@@ -32,4 +32,10 @@ std::string finalize_file(const hf_file & file);
 // Remove the entire cached directory for a repo, returns true if removed
 bool remove_cached_repo(const std::string & repo_id);
 
+// Set custom cache directory path
+void set_cache_dir(const std::string & dir);
+
+// Get current cache directory path
+std::string get_cache_dir();
+
 } // namespace hf_cache

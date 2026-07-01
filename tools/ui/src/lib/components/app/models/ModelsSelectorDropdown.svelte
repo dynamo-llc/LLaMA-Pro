@@ -91,6 +91,36 @@
 			}
 		}
 	}
+
+	let customModelPath = $state('');
+	let isCustomModelLoading = $state(false);
+
+	async function handleLoadCustomModel(event: Event) {
+		event.preventDefault();
+		const path = customModelPath.trim();
+		if (!path) return;
+
+		isCustomModelLoading = true;
+		try {
+			await modelsStore.loadModel(path);
+			const foundOption = modelsStore.models.find((m) => m.model === path || m.id === path);
+			if (foundOption) {
+				await ms.handleSelect(foundOption.id);
+			} else {
+				await modelsStore.fetchRouterModels();
+				const refreshedOption = modelsStore.models.find((m) => m.model === path || m.id === path);
+				if (refreshedOption) {
+					await ms.handleSelect(refreshedOption.id);
+				}
+			}
+			customModelPath = '';
+			isOpen = false;
+		} catch (err) {
+			console.error('Failed to load custom model:', err);
+		} finally {
+			isCustomModelLoading = false;
+		}
+	}
 </script>
 
 <div class={['relative inline-flex flex-col items-end gap-1', className]}>
@@ -100,20 +130,6 @@
 
 			Loading models…
 		</div>
-	{:else if ms.options.length === 0 && ms.isRouter}
-		{#if currentModel}
-			<span
-				class={[
-					'inline-flex items-center gap-1.5 rounded-sm bg-muted-foreground/10 px-1.5 py-1 text-xs text-muted-foreground',
-					className
-				]}
-				style="max-width: min(calc(100cqw - 10rem), 20rem)"
-			>
-				<Package class="h-3.5 w-3.5 shrink-0" />
-			</span>
-		{:else}
-			<p class="text-xs text-muted-foreground">No models available.</p>
-		{/if}
 	{:else}
 		{@const selectedOption = ms.getDisplayOption()}
 		{@const triggerModel = selectedOption?.model}
@@ -139,7 +155,7 @@
 								class={[
 									`relative inline-grid cursor-pointer grid-cols-[1fr_auto_1fr] items-center gap-1.5 rounded-sm bg-background px-1.5 py-1 text-xs shadow-sm transition hover:bg-muted-foreground/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-muted-foreground/15 dark:text-secondary-foreground`,
 									!ms.isCurrentModelInCache
-										? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
+										? 'bg-neutral-400/10 !text-neutral-500 hover:bg-neutral-400/20 hover:text-neutral-500'
 										: forceForegroundText
 											? 'text-foreground'
 											: ms.isHighlightedCurrentModelActive
@@ -195,12 +211,43 @@
 						emptyMessage="No models found."
 						isEmpty={ms.filteredOptions.length === 0 && ms.isCurrentModelInCache}
 					>
+						{#snippet footer()}
+							<div class="p-2.5 flex flex-col gap-1.5 border-t bg-muted/20">
+								<div
+									class="text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider px-1"
+								>
+									Load local GGUF model
+								</div>
+								<form onsubmit={handleLoadCustomModel} class="flex gap-1.5 items-center">
+									<input
+										type="text"
+										placeholder="C:/path/to/model.gguf"
+										bind:value={customModelPath}
+										class="flex h-8 w-64 rounded-md border border-input bg-background px-2.5 py-1 text-xs shadow-sm transition-colors placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+										disabled={isCustomModelLoading}
+									/>
+									<button
+										type="submit"
+										class="inline-flex items-center justify-center rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-8 px-3 whitespace-nowrap"
+										disabled={!customModelPath.trim() || isCustomModelLoading}
+									>
+										{#if isCustomModelLoading}
+											<Loader2 class="h-3 w-3 animate-spin mr-1" />
+											Loading
+										{:else}
+											Load
+										{/if}
+									</button>
+								</form>
+							</div>
+						{/snippet}
+
 						<div class="models-list">
 							{#if !ms.isCurrentModelInCache && currentModel}
 								<!-- Show unavailable model as first option (disabled) -->
 								<button
 									type="button"
-									class="flex w-full cursor-not-allowed items-center bg-red-400/10 p-2 text-left text-sm text-red-400"
+									class="flex w-full cursor-not-allowed items-center bg-neutral-400/10 p-2 text-left text-sm text-neutral-500"
 									role="option"
 									aria-selected="true"
 									aria-disabled="true"
@@ -263,7 +310,7 @@
 							class={[
 								`inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-background px-1.5 py-1 text-xs shadow-sm transition hover:bg-muted-foreground/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-muted-foreground/15 dark:text-secondary-foreground`,
 								!ms.isCurrentModelInCache
-									? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
+									? 'bg-neutral-400/10 !text-neutral-500 hover:bg-neutral-400/20 hover:text-neutral-500'
 									: forceForegroundText
 										? 'text-foreground'
 										: ms.isHighlightedCurrentModelActive

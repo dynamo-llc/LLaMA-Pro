@@ -15,6 +15,7 @@ import { SVELTEKIT_PWA_OPTIONS } from './src/lib/constants/pwa';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SERVER_ORIGIN = import.meta.env?.VITE_PUBLIC_SERVER_ORIGIN || 'http://localhost:8080';
+const ORCHESTRATOR_ORIGIN = import.meta.env?.VITE_PUBLIC_ORCHESTRATOR_ORIGIN || 'http://localhost:8000';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const browserBaseConfig: any = {
@@ -93,7 +94,10 @@ export default defineConfig({
 			'/models': SERVER_ORIGIN,
 			'/tools': SERVER_ORIGIN,
 			'/slots': SERVER_ORIGIN,
-			'/cors-proxy': SERVER_ORIGIN
+			'/metrics': ORCHESTRATOR_ORIGIN,
+			'/cors-proxy': SERVER_ORIGIN,
+			'/telemetry': ORCHESTRATOR_ORIGIN,
+			'/api': ORCHESTRATOR_ORIGIN
 		},
 		headers: {
 			'Cross-Origin-Embedder-Policy': 'require-corp',

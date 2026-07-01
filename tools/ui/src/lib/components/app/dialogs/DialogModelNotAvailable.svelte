@@ -32,7 +32,7 @@
 	<AlertDialog.Content class="max-w-lg">
 		<AlertDialog.Header>
 			<AlertDialog.Title class="flex items-center gap-2">
-				<AlertTriangle class="h-5 w-5 text-amber-500" />
+				<AlertTriangle class="h-5 w-5 text-neutral-500" />
 				Model Not Available
 			</AlertDialog.Title>
 
@@ -42,9 +42,9 @@
 		</AlertDialog.Header>
 
 		<div class="space-y-3">
-			<div class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-				<p class="font-medium text-amber-600 dark:text-amber-400">
-					Requested: <code class="rounded bg-amber-500/20 px-1.5 py-0.5">{modelName}</code>
+			<div class="rounded-lg border border-neutral-500/40 bg-neutral-500/10 px-4 py-3 text-sm">
+				<p class="font-medium text-neutral-600 dark:text-neutral-400">
+					Requested: <code class="rounded bg-neutral-500/20 px-1.5 py-0.5">{modelName}</code>
 				</p>
 			</div>
 

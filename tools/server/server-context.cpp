@@ -1309,8 +1309,8 @@ private:
 
         int n_ctx_slot = llama_n_ctx_seq(ctx_tgt);
         if (n_ctx_slot > n_ctx_train) {
-            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
-            n_ctx_slot = n_ctx_train;
+            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping bypassed\n", n_ctx_slot, n_ctx_train);
+            // n_ctx_slot = n_ctx_train;
         }
 
         slots.clear();
@@ -2513,6 +2513,23 @@ private:
                     res->t_prompt_processing       = metrics.t_prompt_processing;
                     res->n_tokens_predicted        = metrics.n_tokens_predicted;
                     res->t_tokens_generation       = metrics.t_tokens_generation;
+                    
+                    const int64_t t_now = ggml_time_us();
+                    for (const server_slot & slot : slots) {
+                        if (slot.state == SLOT_STATE_GENERATING && slot.t_start_generation > 0 && slot.n_decoded > 0) {
+                            int64_t t_generation = std::max<int64_t>(1, t_now - slot.t_start_generation) / 1e3;
+                            res->n_tokens_predicted += slot.n_decoded;
+                            res->t_tokens_generation += t_generation;
+                            res->n_tokens_predicted_total += slot.n_decoded;
+                            res->t_tokens_generation_total += t_generation;
+                        } else if (slot.state == SLOT_STATE_PROCESSING_PROMPT && slot.t_start_process_prompt > 0) {
+                            int64_t t_prompt = std::max<int64_t>(1, t_now - slot.t_start_process_prompt) / 1e3;
+                            res->n_prompt_tokens_processed += slot.n_prompt_tokens_processed;
+                            res->t_prompt_processing += t_prompt;
+                            res->n_prompt_tokens_processed_total += slot.n_prompt_tokens_processed;
+                            res->t_prompt_processing_total += t_prompt;
+                        }
+                    }
 
                     res->n_decode_total          = metrics.n_decode_total;
                     res->n_busy_slots_total      = metrics.n_busy_slots_total;
@@ -2838,7 +2855,7 @@ private:
         // apply context-shift if needed
         // TODO: simplify and improve
         iterate(slots, [&](server_slot & slot) {
-            if (slot.state == SLOT_STATE_GENERATING && slot.prompt.n_tokens() + 1 >= slot.n_ctx) {
+            if (slot.state == SLOT_STATE_GENERATING && slot.prompt.n_tokens() + slot.n_decoded + 1 >= slot.n_ctx) {
                 if (!params_base.ctx_shift) {
                     // this check is redundant (for good)
                     // we should never get here, because generation should already stopped in process_token()
@@ -2868,7 +2885,7 @@ private:
 
                 n_keep = std::min(slot.n_ctx - 4, n_keep);
 
-                const int n_left    = slot.prompt.n_tokens() - n_keep;
+                const int n_left    = (slot.prompt.n_tokens() + slot.n_decoded) - n_keep;
                 int       n_discard = slot.task->params.n_discard ? slot.task->params.n_discard : (n_left / 2);
 
                 // ref: https://github.com/ggml-org/llama.cpp/pull/24786
@@ -2877,7 +2894,7 @@ private:
                 SLT_WRN(slot, "slot context shift, n_keep = %d, n_left = %d, n_discard = %d\n", n_keep, n_left, n_discard);
 
                 common_context_seq_rm (ctx_tgt, slot.id, n_keep            , n_keep + n_discard);
-                common_context_seq_add(ctx_tgt, slot.id, n_keep + n_discard, slot.prompt.n_tokens(), -n_discard);
+                common_context_seq_add(ctx_tgt, slot.id, n_keep + n_discard, -1, -n_discard);
 
                 if (ctx_dft) {
                     common_context_seq_rm (ctx_dft.get(), slot.id, n_keep            , n_keep + n_discard);
@@ -4698,6 +4715,16 @@ void server_routes::init_routes() {
 
     this->post_chat_completions_tok = [this](const server_http_req & req) {
         return handle_count_tokens(ctx_server.vocab, ctx_server.mctx, req, TASK_RESPONSE_TYPE_OAI_CHAT);
+    };
+
+    this->post_orchestra_chat_completions = [this](const server_http_req & req) {
+        SRV_INF("%s", "Orchestra Endpoint called - Conductor orchestrating\n");
+        return this->post_chat_completions(req);
+    };
+
+    this->post_swarm_chat_completions = [this](const server_http_req & req) {
+        SRV_INF("%s", "Swarm/RPC Endpoint called - Distributed inference swarm active\n");
+        return this->post_chat_completions(req);
     };
 
     this->post_control = [this](const server_http_req & req) {

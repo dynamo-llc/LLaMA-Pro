@@ -368,11 +368,12 @@ class MCPStore {
 	getServerLabel(server: MCPServerSettingsEntry): string {
 		const healthState = this.getHealthCheckState(server.id);
 
-		if (healthState?.status === HealthCheckStatus.SUCCESS)
+		if (healthState?.status === HealthCheckStatus.SUCCESS) {
 			return (
 				healthState.serverInfo?.title || healthState.serverInfo?.name || server.name || server.url
 			);
-		return server.url;
+		}
+		return server.name || server.url;
 	}
 
 	getServerById(serverId: string): MCPServerSettingsEntry | undefined {

@@ -20,6 +20,115 @@
 	import { TooltipSide } from '$lib/enums';
 	import { device } from '$lib/stores/device.svelte';
 	import { circIn } from 'svelte/easing';
+	import { serverStore } from '$lib/stores/server.svelte';
+	import { modelsStore } from '$lib/stores/models.svelte';
+	import { copyToClipboard } from '$lib/utils';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { Server, Copy } from '@lucide/svelte';
+	import { onMount } from 'svelte';
+
+	let isServerAlive = $state(false);
+	let healthCheckFailed = $state(false);
+	let activeInferenceCount = $state(0);
+
+	async function checkServerHealth() {
+		try {
+			const res = await fetch('./telemetry/app', { cache: 'no-store' });
+			if (res.ok) {
+				isServerAlive = true;
+				healthCheckFailed = false;
+				const data = await res.json();
+				activeInferenceCount = data.inferProcessing || 0;
+			} else {
+				isServerAlive = false;
+				healthCheckFailed = true;
+				activeInferenceCount = 0;
+			}
+		} catch (e) {
+			isServerAlive = false;
+			healthCheckFailed = true;
+			activeInferenceCount = 0;
+		}
+	}
+
+	onMount(() => {
+		checkServerHealth();
+		const interval = setInterval(checkServerHealth, 5000);
+		return () => clearInterval(interval);
+	});
+
+	const serverStatus = $derived.by(() => {
+		if (healthCheckFailed) {
+			return 'Offline';
+		}
+		if (serverStore.error) {
+			return 'Error';
+		}
+		if (!isServerAlive) {
+			return 'Offline';
+		}
+		const isGenerating =
+			chatStore.isLoading || chatStore.chatStreamingStates.size > 0 || activeInferenceCount > 0;
+		const isModelLoading =
+			modelsStore.updating || modelsStore.loading || modelsStore.loadingModelIds.length > 0;
+		if (isGenerating || isModelLoading) {
+			return 'Online';
+		}
+		return 'Idle';
+	});
+
+	const serverHost = $derived.by(() => {
+		if (typeof window !== 'undefined') {
+			return `${window.location.protocol}//${window.location.hostname}:8000`;
+		}
+		return 'http://localhost:8000';
+	});
+
+	const loadedSlots = $derived.by(() => {
+		const slots = ['<None>', '<None>', '<None>', '<None>'];
+		if (serverStatus === 'Offline') {
+			return slots;
+		}
+		if (!serverStore.isRouterMode) {
+			const name = modelsStore.singleModelName;
+			if (name) {
+				slots[0] = name;
+			}
+		} else {
+			const loaded = modelsStore.loadedModelIds;
+			const loading = modelsStore.loadingModelIds;
+
+			for (let i = 0; i < Math.min(loaded.length, 4); i++) {
+				slots[i] = loaded[i];
+			}
+
+			// Fill remaining slots with currently loading models
+			let nextSlot = loaded.length;
+			for (let i = 0; i < Math.min(loading.length, 4 - nextSlot); i++) {
+				slots[nextSlot + i] = loading[i];
+			}
+		}
+		return slots;
+	});
+
+	const endpoint1 = $derived(`${serverHost}/v1/chat/completions`);
+	const endpoint2 = $derived(`${serverHost}/v1/orchestra/chat/completions`);
+	const endpoint3 = $derived(`${serverHost}/v1/swarm/chat/completions`);
+
+	const dotStyle = $derived.by(() => {
+		switch (serverStatus) {
+			case 'Online':
+				return 'background-color: #00d2ff; box-shadow: 0 0 8px #00d2ff;'; // Electric Blue
+			case 'Idle':
+				return 'background-color: #4ade80; box-shadow: 0 0 8px #4ade80;'; // Green
+			default:
+				return 'background-color: #9ca3af;'; // Grey
+		}
+	});
+
+	const statusPulseClass = $derived(
+		serverStatus === 'Offline' || serverStatus === 'Error' ? 'blink-slow' : ''
+	);
 
 	interface Props {
 		onSearchClick?: () => void;
@@ -32,6 +141,43 @@
 	let isExpandedMode = $state(false);
 	let hoveredTooltip = $state<string | null>(null);
 	let logoHovered = $state(false);
+
+	let isMonitorOpen = $state(false);
+	let monitorTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	function showMonitor() {
+		if (monitorTimeout) {
+			clearTimeout(monitorTimeout);
+			monitorTimeout = null;
+		}
+		isMonitorOpen = true;
+	}
+
+	function hideMonitor() {
+		if (monitorTimeout) {
+			clearTimeout(monitorTimeout);
+		}
+		monitorTimeout = setTimeout(() => {
+			isMonitorOpen = false;
+			monitorTimeout = null;
+		}, 200);
+	}
+
+	function toggleMonitor(e: MouseEvent) {
+		e.stopPropagation();
+		if (monitorTimeout) {
+			clearTimeout(monitorTimeout);
+			monitorTimeout = null;
+		}
+		isMonitorOpen = !isMonitorOpen;
+	}
+
+	function handleGlobalClick(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+		if (!target.closest('.server-monitor-trigger') && !target.closest('.server-monitor-card')) {
+			isMonitorOpen = false;
+		}
+	}
 
 	const isStripExpanded = $derived(isExpandedMode || hoveredTooltip !== null);
 	const isOnMobile = $derived(isMobile.current);
@@ -140,10 +286,12 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} bind:innerWidth />
+<svelte:window onkeydown={handleKeydown} onclick={handleGlobalClick} bind:innerWidth />
 
 {#if innerWidth > 768 || (!page.url.hash.includes(ROUTES.SETTINGS) && !page.url.hash.includes(ROUTES.MCP_SERVERS) && !page.url.hash.includes(ROUTES.SEARCH))}
 	<aside
+		onmouseenter={() => (isExpandedMode = true)}
+		onmouseleave={() => (isExpandedMode = false)}
 		class={[
 			// Layout & positioning
 			'fixed md:sticky top-2 left-2 md:left-0 md:ml-2 md:mt-2 pt-2 z-10 w-[calc(100dvw-1rem)]',
@@ -169,52 +317,6 @@
 			isExpandedMode && 'is-expanded'
 		]}
 	>
-		<div class="px-2 flex items-center justify-between">
-			<div
-				role="button"
-				tabindex="0"
-				class="relative"
-				onmouseenter={() => (logoHovered = true)}
-				onmouseleave={() => (logoHovered = false)}
-			>
-				<ActionIcon
-					icon={!isExpandedMode && logoHovered && innerWidth > 768 ? PanelLeftOpen : Logo}
-					size="lg"
-					iconSize="h-4.5 w-4.5 md:h-4 md:w-4"
-					class="{isExpandedMode
-						? 'bg-muted! md:bg-foreground/5!'
-						: 'bg-transparent!'} md:h-9 md:w-9 h-10 w-10 rounded-full md:hover:bg-foreground/10! pointer-events-auto"
-					href={isExpandedMode ? ROUTES.START : undefined}
-					onclick={isExpandedMode ? undefined : toggleExpandedMode}
-					tooltip={isExpandedMode ? undefined : 'Open Sidebar'}
-					tooltipSide={TooltipSide.RIGHT}
-					ariaLabel={isExpandedMode ? 'Go to start' : 'Expand navigation'}
-				/>
-			</div>
-
-			{#if isOnMobile || (isExpandedMode && !alwaysShowOnDesktop)}
-				<div
-					class="flex items-center transition-all duration-150 ease-out {isMobile.current &&
-					!isExpandedMode
-						? 'opacity-0 h-0!'
-						: ''}"
-					in:fade={{ duration: 150, easing: circIn, delay: 50 }}
-					out:fade={{ duration: 100 }}
-				>
-					<ActionIcon
-						icon={isMobile.current ? X : PanelLeftClose}
-						size="lg"
-						iconSize="h-4.5 w-4.5 md:h-4 md:w-4"
-						class="backdrop-blur-none md:h-9 md:w-9 h-10 w-10 rounded-full mr-1 hover:bg-accent!"
-						onclick={toggleExpandedMode}
-						tooltip="Close Sidebar"
-						tooltipSide={TooltipSide.LEFT}
-						ariaLabel="Collapse navigation"
-					/>
-				</div>
-			{/if}
-		</div>
-
 		<div class="mt-2 flex min-h-0 flex-1 flex-col gap-4 md:gap-1 overflow-y-auto">
 			<div
 				class="flex min-h-0 flex-1 flex-col gap-4 md:gap-1 {isMobile.current
@@ -243,7 +345,7 @@
 					}}
 				/>
 
-				{#if isExpandedMode || isOnMobile}
+				{#if (isExpandedMode || isOnMobile) && (!page.url.hash || page.url.hash === '#/' || page.url.hash.startsWith('#/chat') || page.url.hash.includes('new_chat='))}
 					<SidebarNavigationConversationList
 						class="px-2"
 						{filteredConversations}
@@ -258,8 +360,170 @@
 				{/if}
 			</div>
 		</div>
+
+		<!-- Server Info & Status Section (spacer only - panel is rendered as fixed overlay below) -->
+		<div class="w-full pb-2 mt-auto"></div>
 	</aside>
 {/if}
+
+{#snippet statusCard()}
+	<div
+		class="w-64 bg-card/95 backdrop-blur-md border border-border/60 rounded-2xl p-4 shadow-lg text-card-foreground text-xs flex flex-col gap-3 font-sans select-none"
+	>
+		<!-- Header -->
+		<div class="flex items-center justify-between border-b border-border/40 pb-2">
+			<span class="font-semibold text-xs tracking-wider uppercase opacity-85">Server Monitor</span>
+			<div class="flex items-center gap-1.5 font-medium">
+				<span class="h-2 w-2 rounded-full {statusPulseClass}" style={dotStyle}></span>
+				<span class="text-[11px] capitalize">{serverStatus}</span>
+			</div>
+		</div>
+
+		<!-- Address -->
+		<div class="flex flex-col gap-1">
+			<span class="text-[10px] text-muted-foreground font-medium uppercase tracking-wider"
+				>Address</span
+			>
+			<div
+				class="flex items-center justify-between bg-muted/50 rounded-lg p-1.5 font-mono text-[11px] border border-border/30"
+			>
+				<span class="truncate pr-1">{serverHost}</span>
+				<button
+					onclick={() => copyToClipboard(serverHost)}
+					class="hover:text-foreground text-muted-foreground p-0.5 rounded transition-colors"
+					aria-label="Copy server address"
+				>
+					<Copy class="h-3 w-3" />
+				</button>
+			</div>
+		</div>
+
+		<!-- Loaded Models -->
+		<div class="flex flex-col gap-1">
+			<span class="text-[10px] text-muted-foreground font-medium uppercase tracking-wider"
+				>Loaded Models</span
+			>
+			<div
+				class="flex flex-col gap-1 bg-muted/30 rounded-lg p-2 border border-border/20 font-mono text-[10px]"
+			>
+				{#each loadedSlots as slotModel, i}
+					{@const isModelLoading =
+						slotModel !== '<None>' && modelsStore.isModelOperationInProgress(slotModel)}
+					{@const loadProgressInfo = isModelLoading ? modelsStore.getLoadProgress(slotModel) : null}
+					<div class="flex flex-col gap-1 {isModelLoading ? 'mb-1' : ''}">
+						<div class="flex items-center justify-between gap-2">
+							<span class="text-muted-foreground font-semibold">Slot #{i + 1}:</span>
+							<span
+								class="truncate text-right flex-1 {slotModel === '<None>'
+									? 'italic text-muted-foreground/50'
+									: isModelLoading
+										? 'text-primary animate-pulse'
+										: 'text-foreground'}"
+								title={slotModel}
+							>
+								{slotModel}
+							</span>
+						</div>
+						{#if isModelLoading && loadProgressInfo}
+							{@const val = Math.round(loadProgressInfo.value * 100)}
+							<div
+								class="flex items-center justify-between text-[8.5px] text-muted-foreground font-semibold tracking-wider mt-0.5"
+							>
+								<span>LOADING...</span>
+								<span>{val}%</span>
+							</div>
+							<div class="h-1 w-full bg-muted overflow-hidden rounded-full">
+								<div
+									class="h-full bg-primary transition-all duration-300"
+									style="width: {val}%"
+								></div>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</div>
+
+		<!-- Active Endpoints -->
+		<div class="flex flex-col gap-1.5">
+			<span class="text-[10px] text-muted-foreground font-medium uppercase tracking-wider"
+				>Active Endpoints</span
+			>
+			<div class="flex flex-col gap-1">
+				<!-- Endpoint 1 -->
+				<div class="flex flex-col bg-muted/40 rounded-lg p-1.5 border border-border/20">
+					<div
+						class="flex items-center justify-between text-[9px] text-muted-foreground font-semibold uppercase"
+					>
+						<span>Loaded Local Models</span>
+					</div>
+					<div class="flex items-center justify-between font-mono text-[10px] mt-0.5">
+						<span class="truncate text-foreground/80">{endpoint1}</span>
+						<button
+							onclick={() => copyToClipboard(endpoint1)}
+							class="hover:text-foreground text-muted-foreground p-0.5 rounded transition-colors"
+							aria-label="Copy local endpoint"
+						>
+							<Copy class="h-3 w-3" />
+						</button>
+					</div>
+				</div>
+
+				<!-- Endpoint 2 -->
+				<div class="flex flex-col bg-muted/40 rounded-lg p-1.5 border border-border/20">
+					<div
+						class="flex items-center justify-between text-[9px] text-muted-foreground font-semibold uppercase"
+					>
+						<span>Agent Swarms (MoA)</span>
+					</div>
+					<div class="flex items-center justify-between font-mono text-[10px] mt-0.5">
+						<span class="truncate text-foreground/80">{endpoint3}</span>
+						<button
+							onclick={() => copyToClipboard(endpoint3)}
+							class="hover:text-foreground text-muted-foreground p-0.5 rounded transition-colors"
+							aria-label="Copy swarm endpoint"
+						>
+							<Copy class="h-3 w-3" />
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{/snippet}
+
+<!-- Fixed lower-left Server Monitor trigger + popover -->
+<div
+	role="region"
+	aria-label="Server monitor controls"
+	class="fixed bottom-3 left-3 z-50 flex flex-col items-start gap-2"
+	onmouseleave={hideMonitor}
+>
+	{#if isMonitorOpen}
+		<div
+			role="region"
+			aria-label="Server monitor status"
+			class="server-monitor-card mb-1"
+			onmouseenter={showMonitor}
+			transition:fade={{ duration: 120 }}
+		>
+			{@render statusCard()}
+		</div>
+	{/if}
+	<button
+		class="server-monitor-trigger relative h-9 w-9 rounded-full bg-card border border-border/60 shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+		onclick={toggleMonitor}
+		onmouseenter={showMonitor}
+		aria-label="Toggle server monitor"
+		title="Server Monitor"
+	>
+		<Server class="h-4 w-4 text-muted-foreground" />
+		<span
+			class="absolute top-1 right-1 h-2 w-2 rounded-full border border-card {statusPulseClass}"
+			style={dotStyle}
+		></span>
+	</button>
+</div>
 
 <style>
 	aside {
@@ -286,6 +550,22 @@
 			background: var(--background);
 			backdrop-filter: blur(1rem);
 			pointer-events: none;
+		}
+	}
+
+	.blink-slow {
+		animation: blink-slow-anim 2.2s ease-in-out infinite;
+	}
+
+	@keyframes blink-slow-anim {
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 0.25;
+			transform: scale(0.9);
 		}
 	}
 </style>

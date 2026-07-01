@@ -343,6 +343,9 @@ common_presets common_preset_context::load_from_models_dir(const std::string & m
 
     std::vector<local_model> models;
     auto scan_subdir = [&models](const std::string & subdir_path, const std::string & name) {
+        if (string_starts_with(name, "ggml-vocab-")) {
+            return;
+        }
         auto files = fs_list(subdir_path, false);
         common_file_info model_file;
         common_file_info first_shard_file;
@@ -374,6 +377,9 @@ common_presets common_preset_context::load_from_models_dir(const std::string & m
         if (file.is_dir) {
             scan_subdir(file.path, file.name);
         } else if (string_ends_with(file.name, ".gguf")) {
+            if (string_starts_with(file.name, "ggml-vocab-")) {
+                continue;
+            }
             // single file model
             std::string name = file.name;
             string_replace_all(name, ".gguf", "");

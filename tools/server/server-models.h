@@ -268,6 +268,9 @@ struct server_models_routes {
     server_http_context::handler_t get_router_models_sse;
     server_http_context::handler_t post_router_models;
     server_http_context::handler_t del_router_models;
+    server_http_context::handler_t get_router_models_cache_dir;
+    server_http_context::handler_t post_router_models_cache_dir;
+    server_http_context::handler_t post_router_models_update_ide;
 };
 
 /**

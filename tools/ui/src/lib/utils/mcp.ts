@@ -140,7 +140,7 @@ export function getMcpLogLevelClass(level: MCPLogLevel): string {
 		case MCPLogLevel.ERROR:
 			return 'text-destructive';
 		case MCPLogLevel.WARN:
-			return 'text-yellow-600 dark:text-yellow-500';
+			return 'text-neutral-600 dark:text-neutral-400';
 		default:
 			return 'text-muted-foreground';
 	}

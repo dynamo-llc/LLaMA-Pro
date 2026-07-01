@@ -1,0 +1,38 @@
+{
+    "active_config_id": "default",
+    "configs": [
+        {
+            "id": "default",
+            "name": "Default Swarm",
+            "nodes": [
+                {
+                    "id": "node-1",
+                    "role": "worker",
+                    "url": "http://127.0.0.1:8080/v1",
+                    "model_name": "little-model",
+                    "temperature": 0.8,
+                    "persona": "You are a creative thinker. Provide an innovative and out-of-the-box perspective.",
+                    "sourceType": "local"
+                },
+                {
+                    "id": "node-2",
+                    "role": "worker",
+                    "url": "http://127.0.0.1:8080/v1",
+                    "model_name": "little-model",
+                    "temperature": 0.8,
+                    "persona": "You are a critical analyst. Focus on facts, logic, and potential pitfalls.",
+                    "sourceType": "local"
+                },
+                {
+                    "id": "node-3",
+                    "role": "synthesizer",
+                    "url": "http://192.168.1.100:8080/v1",
+                    "model_name": "big-model",
+                    "temperature": 0.1,
+                    "persona": "You are the Arbiter Judge. Your job is to read the original conversation and synthesize the proposals into a single cohesive answer.",
+                    "sourceType": "custom"
+                }
+            ]
+        }
+    ]
+}

@@ -34,36 +34,72 @@ namespace hf_cache {
 
 namespace fs = std::filesystem;
 
+
+
+static std::string g_custom_cache_dir;
+
+static fs::path get_settings_file_path() {
+    if (auto * p = std::getenv(HOME_DIR); p && *p) {
+        return fs::path(p) / ".llama_pro_cache_dir";
+    }
+    return fs::path();
+}
+
 static fs::path get_cache_directory() {
-    static const fs::path cache = []() {
-        struct {
-            const char * var;
-            fs::path path;
-        } entries[] = {
-            {"LLAMA_CACHE",           fs::path()},
-            {"HF_HUB_CACHE",          fs::path()},
-            {"HUGGINGFACE_HUB_CACHE", fs::path()},
-            {"HF_HOME",               fs::path("hub")},
-            {"XDG_CACHE_HOME",        fs::path("huggingface") / "hub"},
-            {HOME_DIR,                fs::path(".cache") / "huggingface" / "hub"}
-        };
-        for (const auto & entry : entries) {
-            if (auto * p = std::getenv(entry.var); p && *p) {
-                fs::path base(p);
-                return entry.path.empty() ? base : base / entry.path;
+    if (!g_custom_cache_dir.empty()) {
+        return fs::path(g_custom_cache_dir);
+    }
+
+    fs::path settings_file = get_settings_file_path();
+    if (!settings_file.empty()) {
+        std::error_code ec;
+        if (fs::exists(settings_file, ec)) {
+            std::ifstream ifs(settings_file);
+            std::string line;
+            if (std::getline(ifs, line)) {
+                while (!line.empty() && (line.back() == '\r' || std::isspace((unsigned char)line.back()))) {
+                    line.pop_back();
+                }
+                while (!line.empty() && std::isspace((unsigned char)line.front())) {
+                    line.erase(line.begin());
+                }
+                if (!line.empty()) {
+                    g_custom_cache_dir = line;
+                    return fs::path(g_custom_cache_dir);
+                }
             }
         }
-#ifndef _WIN32
-        const struct passwd * pw = getpwuid(getuid());
+    }
 
-        if (pw && pw->pw_dir && *pw->pw_dir) {
-            return fs::path(pw->pw_dir) / ".cache" / "huggingface" / "hub";
+    struct {
+        const char * var;
+        fs::path path;
+    } entries[] = {
+        {"LLAMA_CACHE",           fs::path()},
+        {"HF_HUB_CACHE",          fs::path()},
+        {"HUGGINGFACE_HUB_CACHE", fs::path()},
+        {"HF_HOME",               fs::path("hub")},
+        {"XDG_CACHE_HOME",        fs::path("huggingface") / "hub"}
+    };
+    for (const auto & entry : entries) {
+        if (auto * p = std::getenv(entry.var); p && *p) {
+            fs::path base(p);
+            return entry.path.empty() ? base : base / entry.path;
         }
-#endif
-        throw std::runtime_error("Failed to determine HF cache directory");
-    }();
+    }
+#ifdef _WIN32
+    return "C:\\Ai-Models";
+#else
+    if (auto * p = std::getenv("HOME"); p && *p) {
+        return fs::path(p) / ".cache" / "huggingface" / "hub";
+    }
+    const struct passwd * pw = getpwuid(getuid());
 
-    return cache;
+    if (pw && pw->pw_dir && *pw->pw_dir) {
+        return fs::path(pw->pw_dir) / ".cache" / "huggingface" / "hub";
+    }
+    throw std::runtime_error("Failed to determine HF cache directory");
+#endif
 }
 
 static std::string folder_name_to_repo(const std::string & folder) {
@@ -449,6 +485,32 @@ hf_files get_cached_files(const std::string & repo_id) {
         }
     }
 
+    // Scan for raw .gguf files directly or nested in the cache directory
+    if (repo_id.empty() || repo_id == "local/models") {
+        try {
+            auto dir_opts = fs::directory_options::skip_permission_denied;
+            for (auto it = fs::recursive_directory_iterator(cache_dir, dir_opts); it != fs::recursive_directory_iterator(); ++it) {
+                if (it->is_directory()) {
+                    std::string folder_name = it->path().filename().string();
+                    if (folder_name.rfind("models--", 0) == 0) {
+                        it.disable_recursion_pending();
+                        continue;
+                    }
+                }
+                if (it->is_regular_file() && it->path().extension() == ".gguf") {
+                    hf_file file;
+                    file.repo_id = "local/models";
+                    file.path = it->path().filename().string();
+                    file.local_path = it->path().string();
+                    file.final_path = file.local_path;
+                    files.push_back(std::move(file));
+                }
+            }
+        } catch (const std::exception & e) {
+            LOG_WRN("%s: failed to scan directory for raw GGUF files: %s\n", __func__, e.what());
+        }
+    }
+
     return files;
 }
 
@@ -508,6 +570,25 @@ bool remove_cached_repo(const std::string & repo_id) {
         return false;
     }
     return removed > 0;
+}
+
+void set_cache_dir(const std::string & dir) {
+    g_custom_cache_dir = dir;
+    fs::path settings_file = get_settings_file_path();
+    if (!settings_file.empty()) {
+        std::ofstream ofs(settings_file);
+        if (ofs.is_open()) {
+            ofs << dir << std::endl;
+        }
+    }
+}
+
+std::string get_cache_dir() {
+    try {
+        return get_cache_directory().string();
+    } catch (...) {
+        return "";
+    }
 }
 
 } // namespace hf_cache

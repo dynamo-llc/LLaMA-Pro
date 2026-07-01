@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import logoMark from '$lib/assets/logo.svg?raw';
 	let { class: className = '', style = '' } = $props();
 </script>

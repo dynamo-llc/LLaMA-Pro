@@ -18,11 +18,11 @@
 	let serverData = $derived(serverProps());
 
 	function getStatusColor() {
-		if (loading) return 'bg-yellow-500';
-		if (error) return 'bg-red-500';
-		if (serverData) return 'bg-green-500';
+		if (loading) return 'bg-neutral-300 dark:bg-neutral-700 animate-pulse';
+		if (error) return 'bg-neutral-400 dark:bg-neutral-600';
+		if (serverData) return 'bg-neutral-950 dark:bg-neutral-50';
 
-		return 'bg-gray-500';
+		return 'bg-neutral-500';
 	}
 
 	function getStatusText() {

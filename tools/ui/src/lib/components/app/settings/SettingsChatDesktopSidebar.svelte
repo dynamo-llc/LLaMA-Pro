@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Settings } from '@lucide/svelte';
 	import type { SettingsSection, SettingsSectionTitle } from '$lib/constants';
 
 	interface Props {
@@ -13,11 +12,6 @@
 </script>
 
 <div class="sticky top-2 hidden w-64 flex-col self-start bg-background py-4 md:flex gap-6">
-	<div class="flex items-center gap-2 py-2">
-		<Settings class="h-5 w-5 md:h-6 md:w-6" />
-
-		<h1 class="text-xl font-semibold md:text-2xl">Settings</h1>
-	</div>
 
 	<nav class="space-y-1">
 		{#each sections as section (section.title)}

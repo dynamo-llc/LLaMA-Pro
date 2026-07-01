@@ -5,6 +5,9 @@
 #include "build-info.h"
 #include "preset.h"
 #include "download.h"
+#include "hf-cache.h"
+
+#include "ggml-backend.h"
 
 #include <cpp-httplib/httplib.h> // TODO: remove this once we use HTTP client from download.h
 #include <sheredom/subprocess.h>
@@ -147,6 +150,9 @@ static void unset_reserved_args(common_preset & preset, bool unset_model_args) {
         preset.unset_option("LLAMA_ARG_MMPROJ");
         preset.unset_option("LLAMA_ARG_ALIAS");
         preset.unset_option("LLAMA_ARG_HF_REPO");
+        preset.unset_option("LLAMA_ARG_CHAT_TEMPLATE");
+        preset.unset_option("LLAMA_ARG_CHAT_TEMPLATE_FILE");
+        preset.unset_option("LLAMA_ARG_CHAT_TEMPLATE_KWARGS");
     }
 }
 
@@ -706,10 +712,6 @@ std::optional<server_model_meta> server_models::get_meta(const std::string & nam
 
 static int get_free_port() {
 #ifdef _WIN32
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        return -1;
-    }
     typedef SOCKET native_socket_t;
 #define INVALID_SOCKET_VAL INVALID_SOCKET
 #define CLOSE_SOCKET(s) closesocket(s)
@@ -721,9 +723,6 @@ static int get_free_port() {
 
     native_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET_VAL) {
-#ifdef _WIN32
-        WSACleanup();
-#endif
         return -1;
     }
 
@@ -735,9 +734,6 @@ static int get_free_port() {
 
     if (bind(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0) {
         CLOSE_SOCKET(sock);
-#ifdef _WIN32
-        WSACleanup();
-#endif
         return -1;
     }
 
@@ -748,18 +744,12 @@ static int get_free_port() {
 #endif
     if (getsockname(sock, (struct sockaddr*)&serv_addr, &namelen) != 0) {
         CLOSE_SOCKET(sock);
-#ifdef _WIN32
-        WSACleanup();
-#endif
         return -1;
     }
 
     int port = ntohs(serv_addr.sin_port);
 
     CLOSE_SOCKET(sock);
-#ifdef _WIN32
-    WSACleanup();
-#endif
 
     return port;
 }
@@ -883,6 +873,69 @@ void server_models::load(const std::string & name, const load_options & opts) {
         inst.meta.update_args(ctx_preset, bin_path); // render args
 
         std::vector<std::string> child_args = inst.meta.args; // copy
+        if (opts.mode != SERVER_CHILD_MODE_DOWNLOAD) {
+            bool has_ctx_size = false;
+            bool has_parallel = false;
+            bool has_ctx_shift = false;
+            bool has_ngl = false;
+            bool has_ctk = false;
+            bool has_ctv = false;
+            bool has_fa = false;
+            for (const auto & arg : child_args) {
+                if (arg == "-c" || arg == "--ctx-size") {
+                    has_ctx_size = true;
+                } else if (arg == "-np" || arg == "--parallel") {
+                    has_parallel = true;
+                } else if (arg == "--context-shift" || arg == "--no-context-shift") {
+                    has_ctx_shift = true;
+                } else if (arg == "-ngl" || arg == "--n-gpu-layers") {
+                    has_ngl = true;
+                } else if (arg == "-ctk" || arg == "--cache-type-k") {
+                    has_ctk = true;
+                } else if (arg == "-ctv" || arg == "--cache-type-v") {
+                    has_ctv = true;
+                } else if (arg == "-fa" || arg == "--flash-attn") {
+                    has_fa = true;
+                }
+            }
+            if (!has_ctx_size) {
+                child_args.push_back("--ctx-size");
+                child_args.push_back("65536");
+            }
+            if (!has_parallel) {
+                child_args.push_back("--parallel");
+                child_args.push_back("1");
+            }
+            if (!has_ctx_shift) {
+                child_args.push_back("--context-shift");
+            }
+            if (!has_ngl) {
+                child_args.push_back("-ngl");
+                child_args.push_back("999");
+            }
+            if (!has_ctk) {
+                child_args.push_back("-ctk");
+                child_args.push_back("q8_0");
+            }
+            if (!has_ctv) {
+                child_args.push_back("-ctv");
+                child_args.push_back("q8_0");
+            }
+            if (!has_fa) {
+                child_args.push_back("-fa");
+                child_args.push_back("on");
+            }
+            bool has_metrics = false;
+            for (const auto & arg : child_args) {
+                if (arg == "--metrics" || arg == "--no-metrics") {
+                    has_metrics = true;
+                    break;
+                }
+            }
+            if (!has_metrics) {
+                child_args.push_back("--metrics");
+            }
+        }
         std::vector<std::string> child_env  = base_env; // copy
         child_env.push_back("LLAMA_SERVER_ROUTER_PORT=" + std::to_string(base_params.port));
 
@@ -1551,6 +1604,32 @@ static void res_err(std::unique_ptr<server_http_res> & res, const json & error_d
 
 static bool router_validate_model(std::string & name, server_models & models, bool models_autoload, std::unique_ptr<server_http_res> & res) {
     if (name.empty()) {
+        // Fallback: check if there's any active/loaded model
+        for (const auto & m : models.get_all_meta()) {
+            if (m.is_ready()) {
+                name = m.name;
+                break;
+            }
+        }
+        // If still empty, check if there is any running model at all
+        if (name.empty()) {
+            for (const auto & m : models.get_all_meta()) {
+                if (m.is_running()) {
+                    name = m.name;
+                    break;
+                }
+            }
+        }
+        // If still empty, use the first model from all available models (if any exist)
+        if (name.empty()) {
+            auto all_meta = models.get_all_meta();
+            if (!all_meta.empty()) {
+                name = all_meta[0].name;
+            }
+        }
+    }
+
+    if (name.empty()) {
         res_err(res, format_error_response("model name is missing from the request", ERROR_TYPE_INVALID_REQUEST));
         return false;
     }
@@ -1581,6 +1660,52 @@ static bool is_autoload(const common_params & params, const server_http_req & re
     }
 }
 
+static json get_system_ram_info() {
+    uint64_t total_ram = 0;
+    uint64_t free_ram = 0;
+#ifdef _WIN32
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    if (GlobalMemoryStatusEx(&memInfo)) {
+        total_ram = memInfo.ullTotalPhys;
+        free_ram = memInfo.ullAvailPhys;
+    }
+#else
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && page_size > 0) {
+        total_ram = (uint64_t)pages * page_size;
+    }
+    long avail_pages = sysconf(_SC_AVPHYS_PAGES);
+    if (avail_pages > 0 && page_size > 0) {
+        free_ram = (uint64_t)avail_pages * page_size;
+    }
+#endif
+    return {
+        {"total", total_ram},
+        {"free",  free_ram}
+    };
+}
+
+static json get_vram_info() {
+    size_t total_vram = 0;
+    size_t free_vram = 0;
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+            size_t dev_free = 0;
+            size_t dev_total = 0;
+            ggml_backend_dev_memory(dev, &dev_free, &dev_total);
+            total_vram += dev_total;
+            free_vram += dev_free;
+        }
+    }
+    return {
+        {"total", total_vram},
+        {"free",  free_vram}
+    };
+}
+
 void server_models_routes::init_routes() {
     this->get_router_props = [this](const server_http_req & req) {
         std::string name = req.get_param("model");
@@ -1603,6 +1728,8 @@ void server_models_routes::init_routes() {
                 {"ui_settings",          ui_settings},
                 {"build_info",           std::string(llama_build_info())},
                 {"cors_proxy_enabled",   params.ui_mcp_proxy},
+                {"system_ram",           get_system_ram_info()},
+                {"vram",                 get_vram_info()},
             });
             return res;
         }
@@ -1610,6 +1737,30 @@ void server_models_routes::init_routes() {
     };
 
     this->proxy_get = [this](const server_http_req & req) {
+        if (req.path == "/metrics") {
+            std::string aggregated = "";
+            for (const auto & m : models.get_all_meta()) {
+                if (m.is_ready()) {
+                    try {
+                        httplib::ClientImpl cli("127.0.0.1", m.port);
+                        cli.set_connection_timeout(1, 0);
+                        cli.set_read_timeout(1, 0);
+                        auto res = cli.Get("/metrics");
+                        if (res && res->status == 200) {
+                            aggregated += res->body + "\n";
+                        }
+                    } catch (...) {
+                        // ignore errors
+                    }
+                }
+            }
+            auto res = std::make_unique<server_http_res>();
+            res->status = 200;
+            res->content_type = "text/plain; version=0.0.4";
+            res->data = aggregated.empty() ? "# no metrics available\n" : aggregated;
+            return res;
+        }
+
         std::string method = "GET";
         std::string name = req.get_param("model");
         bool autoload = is_autoload(params, req);
@@ -1638,6 +1789,35 @@ void server_models_routes::init_routes() {
         std::string name = json_value(body, "model", std::string());
         auto meta = models.get_meta(name);
         if (!meta.has_value()) {
+            std::string name_lower = name;
+            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+            if (string_ends_with(name_lower, ".gguf")) {
+                std::error_code ec;
+                if (std::filesystem::exists(name, ec) && std::filesystem::is_regular_file(name, ec)) {
+                    server_model_meta new_meta;
+                    new_meta.source = SERVER_MODEL_SOURCE_PRESET;
+                    new_meta.name = name;
+                    new_meta.preset.set_option(models.ctx_preset, "LLAMA_ARG_MODEL", name);
+                    new_meta.status = SERVER_MODEL_STATUS_UNLOADED;
+                    new_meta.stop_timeout = DEFAULT_STOP_TIMEOUT;
+                    new_meta.multimodal = { false, false };
+                    new_meta.update_caps();
+
+                    {
+                        std::lock_guard<std::mutex> lk(models.mutex);
+                        try {
+                            models.add_model(std::move(new_meta));
+                        } catch (const std::exception & e) {
+                            res_err(res, format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+                            return res;
+                        }
+                    }
+                    models.notify_sse("models_reload", "*");
+                    meta = models.get_meta(name);
+                }
+            }
+        }
+        if (!meta.has_value()) {
             res_err(res, format_error_response("model is not found", ERROR_TYPE_NOT_FOUND));
             return res;
         }
@@ -1645,7 +1825,13 @@ void server_models_routes::init_routes() {
             res_err(res, format_error_response("model is already running", ERROR_TYPE_INVALID_REQUEST));
             return res;
         }
-        models.load(meta->name);
+        server_models::load_options opts;
+        std::string rpc = json_value(body, "rpc", std::string());
+        if (!rpc.empty()) {
+            opts.custom_meta = *meta;
+            opts.custom_meta->preset.set_option(models.ctx_preset, "LLAMA_ARG_RPC", rpc);
+        }
+        models.load(meta->name, opts);
         res_ok(res, {{"success", true}});
         return res;
     };
@@ -1691,6 +1877,46 @@ void server_models_routes::init_routes() {
                 {"output_modalities", json::array({"text"})},
             };
 
+            uint64_t size_bytes = 0;
+            std::string model_path_str;
+            if (meta.preset.get_option("LLAMA_ARG_MODEL", model_path_str)) {
+                try {
+                    std::filesystem::path p(model_path_str);
+                    if (std::filesystem::exists(p)) {
+                        size_bytes = std::filesystem::file_size(p);
+                    }
+                } catch (...) {
+                    // Ignore
+                }
+            }
+
+            // Fallback for cached HuggingFace models
+            if (size_bytes == 0) {
+                try {
+                    auto [repo_id, tag] = common_download_split_repo_tag(meta.name);
+                    if (!repo_id.empty() && !tag.empty()) {
+                        std::string tag_upper = tag;
+                        std::transform(tag_upper.begin(), tag_upper.end(), tag_upper.begin(), ::toupper);
+
+                        auto cached_files = hf_cache::get_cached_files(repo_id);
+                        for (const auto & f : cached_files) {
+                            std::string path_upper = f.path;
+                            std::transform(path_upper.begin(), path_upper.end(), path_upper.begin(), ::toupper);
+
+                            if (path_upper.find(tag_upper) != std::string::npos) {
+                                std::filesystem::path p(f.local_path);
+                                if (std::filesystem::exists(p)) {
+                                    size_bytes = std::filesystem::file_size(p);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } catch (...) {
+                    // Ignore
+                }
+            }
+
             json model_info = json {
                 {"id",            meta.name},
                 {"aliases",       meta.aliases},
@@ -1702,8 +1928,7 @@ void server_models_routes::init_routes() {
                 {"architecture",  architecture},
                 {"source",        server_model_source_to_string(meta.source)},
                 {"can_remove",    meta.source == SERVER_MODEL_SOURCE_CACHE},
-                // {"need_download", meta.need_download},
-                // TODO: add other fields, may require reading GGUF metadata
+                {"size_bytes",    size_bytes},
             };
 
             // merge with loaded_info from the child process if available
@@ -1827,6 +2052,238 @@ void server_models_routes::init_routes() {
         models.remove(name); // throws on error
 
         res_ok(res, {{"success", true}});
+        return res;
+    };
+
+    this->get_router_models_cache_dir = [this](const server_http_req &) {
+        auto res = std::make_unique<server_http_res>();
+        res_ok(res, {{"cache_dir", hf_cache::get_cache_dir()}});
+        return res;
+    };
+
+    this->post_router_models_cache_dir = [this](const server_http_req & req) {
+        auto res = std::make_unique<server_http_res>();
+        json body = json::parse(req.body);
+        std::string dir = json_value(body, "cache_dir", std::string());
+        if (dir.empty()) {
+            throw std::invalid_argument("cache_dir must be a non-empty string");
+        }
+        
+#ifdef _WIN32
+        _putenv_s("LLAMA_CACHE", dir.c_str());
+        _putenv_s("HF_HUB_CACHE", dir.c_str());
+        _putenv_s("HUGGINGFACE_HUB_CACHE", dir.c_str());
+        _putenv_s("HF_HOME", dir.c_str());
+#else
+        setenv("LLAMA_CACHE", dir.c_str(), 1);
+        setenv("HF_HUB_CACHE", dir.c_str(), 1);
+        setenv("HUGGINGFACE_HUB_CACHE", dir.c_str(), 1);
+        setenv("HF_HOME", dir.c_str(), 1);
+#endif
+
+        hf_cache::set_cache_dir(dir);
+
+        models.load_models();
+        models.notify_sse("models_reload", "*");
+
+        res_ok(res, {{"success", true}, {"cache_dir", dir}});
+        return res;
+    };
+
+    this->post_router_models_update_ide = [this](const server_http_req & req) {
+        auto res = std::make_unique<server_http_res>();
+
+        std::vector<std::string> paths;
+#ifdef _WIN32
+        const char * appdata = std::getenv("APPDATA");
+        if (appdata) {
+            std::string appdata_str(appdata);
+            paths.push_back(appdata_str + "\\Code\\User\\settings.json");
+            paths.push_back(appdata_str + "\\Code - Insiders\\User\\settings.json");
+            paths.push_back(appdata_str + "\\VSCodium\\User\\settings.json");
+            paths.push_back(appdata_str + "\\OpenCode\\User\\settings.json");
+            paths.push_back(appdata_str + "\\Open Code\\User\\settings.json");
+            paths.push_back(appdata_str + "\\Antigravity\\User\\settings.json");
+            paths.push_back(appdata_str + "\\Antigravity IDE\\User\\settings.json");
+            paths.push_back(appdata_str + "\\Agents - Insiders\\User\\settings.json");
+        }
+#else
+        const char * home = std::getenv("HOME");
+        if (home) {
+            std::string home_str(home);
+            // Linux
+            paths.push_back(home_str + "/.config/Code/User/settings.json");
+            paths.push_back(home_str + "/.config/Code - Insiders/User/settings.json");
+            paths.push_back(home_str + "/.config/VSCodium/User/settings.json");
+            paths.push_back(home_str + "/.config/OpenCode/User/settings.json");
+            paths.push_back(home_str + "/.config/Open Code/User/settings.json");
+            paths.push_back(home_str + "/.config/Antigravity/User/settings.json");
+            paths.push_back(home_str + "/.config/Antigravity IDE/User/settings.json");
+            paths.push_back(home_str + "/.config/Agents - Insiders/User/settings.json");
+            // macOS
+            paths.push_back(home_str + "/Library/Application Support/Code/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/Code - Insiders/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/VSCodium/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/OpenCode/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/Open Code/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/Antigravity/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/Antigravity IDE/User/settings.json");
+            paths.push_back(home_str + "/Library/Application Support/Agents - Insiders/User/settings.json");
+        }
+#endif
+
+        int updated_count = 0;
+        std::string endpoint_url = "http://127.0.0.1:" + std::to_string(params.port);
+        std::string chat_url = endpoint_url + "/v1/chat/completions";
+
+        json chat_models_json = json::array();
+        for (const auto & meta : models.get_all_meta()) {
+            if (meta.is_failed()) continue;
+
+            // Default fallback context size
+            int max_input_tokens = 32768;
+
+            // Try to read from environment variable
+            const char * env_ctx = std::getenv("LLAMA_ARG_CTX_SIZE");
+            if (env_ctx) {
+                try {
+                    max_input_tokens = std::stoi(env_ctx);
+                } catch (...) {}
+            }
+
+            // Try to read from command-line arguments of this model
+            for (size_t i = 0; i < meta.args.size(); ++i) {
+                if ((meta.args[i] == "-c" || meta.args[i] == "--ctx-size") && i + 1 < meta.args.size()) {
+                    try {
+                        max_input_tokens = std::stoi(meta.args[i + 1]);
+                    } catch (...) {}
+                }
+            }
+
+            // If the model is running, read the exact configured context size from loaded_info
+            if (meta.is_running() && meta.loaded_info.contains("default_generation_settings")) {
+                auto gen_settings = meta.loaded_info["default_generation_settings"];
+                if (gen_settings.contains("n_ctx")) {
+                    max_input_tokens = gen_settings["n_ctx"].get<int>();
+                }
+            }
+
+            // Cap the output tokens to a safe portion of context size (e.g. max 16000, or half of context size)
+            int max_output_tokens = std::min(16000, max_input_tokens / 2);
+            if (max_output_tokens < 1024) {
+                max_output_tokens = 1024;
+            }
+
+            json model_item = json {
+                {"id",             meta.name},
+                {"name",           meta.name},
+                {"url",            chat_url},
+                {"toolCalling",    true},
+                {"vision",         meta.multimodal.inp_vision},
+                {"maxInputTokens", max_input_tokens},
+                {"maxOutputTokens", max_output_tokens}
+            };
+            chat_models_json.push_back(model_item);
+        }
+
+        // Add Agent Swarm (MOA) model to IDE models list
+        json swarm_item = json {
+            {"id",             "swarm-ensemble"},
+            {"name",           "Agent Swarm (MOA)"},
+            {"url",            endpoint_url + "/v1/swarm/chat/completions"},
+            {"toolCalling",    true},
+            {"vision",         false},
+            {"maxInputTokens", 32768},
+            {"maxOutputTokens", 4096}
+        };
+        chat_models_json.push_back(swarm_item);
+
+        for (const auto & path : paths) {
+            try {
+                if (std::filesystem::exists(path)) {
+                    std::ifstream f(path);
+                    if (!f.is_open()) continue;
+                    json j;
+                    try {
+                        f >> j;
+                    } catch (...) {
+                        j = json::object();
+                    }
+                    f.close();
+
+                    j["llama-vscode.endpoint"] = endpoint_url;
+                    j["llama-vscode.endpoint_chat"] = endpoint_url;
+                    j["llama-vscode.endpoint_tools"] = endpoint_url;
+                    j["llama-vscode.endpoint_embeddings"] = endpoint_url;
+
+                    std::ofstream out(path);
+                    if (out.is_open()) {
+                        out << j.dump(4);
+                        out.close();
+                    }
+
+                    // Update chatLanguageModels.json in the same directory
+                    try {
+                        std::filesystem::path p_settings(path);
+                        std::filesystem::path p_chat = p_settings.parent_path() / "chatLanguageModels.json";
+                        std::string chat_path = p_chat.string();
+
+                        json j_arr;
+                        {
+                            std::ifstream chat_in(chat_path);
+                            if (chat_in.is_open()) {
+                                try {
+                                    chat_in >> j_arr;
+                                } catch (...) {
+                                    j_arr = json::array();
+                                }
+                                chat_in.close();
+                            } else {
+                                j_arr = json::array();
+                            }
+                        }
+
+                        if (!j_arr.is_array()) {
+                            j_arr = json::array();
+                        }
+
+                        bool found = false;
+                        for (auto & item : j_arr) {
+                            if (item.is_object() && item.contains("vendor") && item["vendor"] == "customendpoint") {
+                                item["models"] = chat_models_json;
+                                item["name"] = "Custom Endpoint";
+                                item["apiType"] = "chat-completions";
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            json new_endpoint = json {
+                                {"name", "Custom Endpoint"},
+                                {"vendor", "customendpoint"},
+                                {"apiType", "chat-completions"},
+                                {"models", chat_models_json}
+                            };
+                            j_arr.push_back(new_endpoint);
+                        }
+
+                        std::ofstream chat_out(chat_path);
+                        if (chat_out.is_open()) {
+                            chat_out << j_arr.dump(4);
+                            chat_out.close();
+                        }
+                    } catch (...) {
+                        // Ignore chatLanguageModels errors
+                    }
+
+                    updated_count++;
+                }
+            } catch (...) {
+                // Ignore errors
+            }
+        }
+
+        res_ok(res, {{"success", true}, {"updated_count", updated_count}});
         return res;
     };
 }
@@ -1992,7 +2449,8 @@ server_http_proxy::server_http_proxy(
         int32_t timeout_write
         ) {
     // shared between reader and writer threads
-    auto cli  = std::make_shared<httplib::ClientImpl>(host, port);
+    std::string target_host = host == "localhost" ? "127.0.0.1" : host;
+    auto cli  = std::make_shared<httplib::ClientImpl>(target_host, port);
     auto pipe = std::make_shared<pipe_t<msg_t>>();
 
     if (scheme == "https") {

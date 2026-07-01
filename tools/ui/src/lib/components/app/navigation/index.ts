@@ -172,3 +172,4 @@ export { default as SidebarNavigationSearchResults } from './SidebarNavigation/S
  * Integrated into sidebar header with proper styling.
  */
 export { default as SidebarNavigationSearch } from './SidebarNavigation/SidebarNavigationSearch.svelte';
+export { default as HuggingFaceIcon } from './HuggingFaceIcon.svelte';

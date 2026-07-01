@@ -10,10 +10,9 @@
 #include <memory>
 #include <string>
 #include <thread>
-
-//
-// HTTP implementation using cpp-httplib
-//
+#include <mutex>
+#include <chrono>
+#include <iomanip>
 
 class server_http_context::Impl {
 public:
@@ -26,24 +25,44 @@ server_http_context::server_http_context()
 
 server_http_context::~server_http_context() = default;
 
+struct traffic_log_entry {
+    std::string timestamp;
+    std::string method;
+    std::string path;
+    int status;
+};
+
+static std::mutex traffic_logs_mutex;
+static std::vector<traffic_log_entry> traffic_logs;
+const size_t MAX_TRAFFIC_LOGS = 20;
+
 static void log_server_request(const httplib::Request & req, const httplib::Response & res) {
-    // skip logging requests that are regularly sent, to avoid log spam
-    if (req.path == "/health"
-        || req.path == "/v1/health"
-        || req.path == "/models"
-        || req.path == "/v1/models"
-        || req.path == "/props"
-        || req.path == "/metrics"
-    ) {
+    if (req.path == "/traffic") {
         return;
     }
 
-    // reminder: this function is not covered by httplib's exception handler; if someone does more complicated stuff, think about wrapping it in try-catch
+    try {
+        std::lock_guard<std::mutex> lock(traffic_logs_mutex);
 
-    SRV_TRC("done request: %s %s %s %d\n", req.method.c_str(), req.path.c_str(), req.remote_addr.c_str(), res.status);
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        struct tm tm_info;
+#ifdef _WIN32
+        localtime_s(&tm_info, &time_t_now);
+#else
+        localtime_r(&time_t_now, &tm_info);
+#endif
+        char time_str[64];
+        std::strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_info);
 
-    SRV_DBG("request:  %s\n", req.body.c_str());
-    SRV_DBG("response: %s\n", res.body.c_str());
+        traffic_log_entry entry{time_str, req.method, req.path, res.status};
+        traffic_logs.push_back(entry);
+        if (traffic_logs.size() > MAX_TRAFFIC_LOGS) {
+            traffic_logs.erase(traffic_logs.begin());
+        }
+    } catch (...) {
+        // safety
+    }
 }
 
 // For Google Cloud Platform deployment compatibility
@@ -113,7 +132,23 @@ bool server_http_context::init(const common_params & params) {
 #endif
 
     srv->set_default_headers({{"Server", "llama.cpp"}});
-    // srv->set_logger(log_server_request); // TODO @ngxson : this is too spamy, no very useful; improve it in the future
+    srv->set_logger(log_server_request);
+    srv->Get("/traffic", [](const httplib::Request &, httplib::Response & res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        json j = json::array();
+        {
+            std::lock_guard<std::mutex> lock(traffic_logs_mutex);
+            for (const auto & entry : traffic_logs) {
+                j.push_back({
+                    {"timestamp", entry.timestamp},
+                    {"method",    entry.method},
+                    {"path",      entry.path},
+                    {"status",    entry.status}
+                });
+            }
+        }
+        res.set_content(j.dump(), "application/json; charset=utf-8");
+    });
     srv->set_exception_handler([](const httplib::Request &, httplib::Response & res, const std::exception_ptr & ep) {
         // this is fail-safe; exceptions should already handled by `ex_wrapper`
 

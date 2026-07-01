@@ -53,6 +53,36 @@
 			ms.handleOpenChange(false);
 		}
 	}
+
+	let customModelPath = $state('');
+	let isCustomModelLoading = $state(false);
+
+	async function handleLoadCustomModel(event: Event) {
+		event.preventDefault();
+		const path = customModelPath.trim();
+		if (!path) return;
+
+		isCustomModelLoading = true;
+		try {
+			await modelsStore.loadModel(path);
+			const foundOption = modelsStore.models.find((m) => m.model === path || m.id === path);
+			if (foundOption) {
+				await ms.handleSelect(foundOption.id);
+			} else {
+				await modelsStore.fetchRouterModels();
+				const refreshedOption = modelsStore.models.find((m) => m.model === path || m.id === path);
+				if (refreshedOption) {
+					await ms.handleSelect(refreshedOption.id);
+				}
+			}
+			customModelPath = '';
+			sheetOpen = false;
+		} catch (err) {
+			console.error('Failed to load custom model:', err);
+		} finally {
+			isCustomModelLoading = false;
+		}
+	}
 </script>
 
 <div class={['relative inline-flex flex-col items-end gap-1', className]}>
@@ -61,8 +91,6 @@
 			<Loader2 class="h-3.5 w-3.5 animate-spin" />
 			Loading models…
 		</div>
-	{:else if ms.options.length === 0 && ms.isRouter}
-		<p class="text-xs text-muted-foreground">No models available.</p>
 	{:else}
 		{@const selectedOption = ms.getDisplayOption()}
 		{@const triggerModel = selectedOption?.model}
@@ -83,7 +111,7 @@
 				class={[
 					`relative inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-background px-1.5 py-1 text-xs shadow-sm transition hover:bg-muted-foreground/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 max-sm:px-3 max-sm:py-2 max-sm:text-sm dark:bg-muted-foreground/15 dark:text-secondary-foreground`,
 					!ms.isCurrentModelInCache
-						? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
+						? 'bg-neutral-400/10 !text-neutral-500 hover:bg-neutral-400/20 hover:text-neutral-500'
 						: forceForegroundText
 							? 'text-foreground'
 							: ms.isHighlightedCurrentModelActive
@@ -143,7 +171,7 @@
 							{#if !ms.isCurrentModelInCache && currentModel}
 								<button
 									type="button"
-									class="flex w-full cursor-not-allowed items-center rounded-md bg-red-400/10 px-3 py-2.5 text-left text-sm text-red-400"
+									class="flex w-full cursor-not-allowed items-center rounded-md bg-neutral-400/10 px-3 py-2.5 text-left text-sm text-neutral-500"
 									disabled
 								>
 									<span class="min-w-0 flex-1 truncate">
@@ -168,6 +196,33 @@
 								onInfoClick={ms.handleInfoClick}
 							/>
 						</div>
+
+						<div class="mt-4 border-t pt-4 px-4 flex flex-col gap-2 bg-muted/10">
+							<div class="text-xs font-semibold text-muted-foreground/80 uppercase tracking-wider">
+								Load local GGUF model
+							</div>
+							<form onsubmit={handleLoadCustomModel} class="flex gap-2 items-center pb-2">
+								<input
+									type="text"
+									placeholder="C:/path/to/model.gguf"
+									bind:value={customModelPath}
+									class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+									disabled={isCustomModelLoading}
+								/>
+								<button
+									type="submit"
+									class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 whitespace-nowrap"
+									disabled={!customModelPath.trim() || isCustomModelLoading}
+								>
+									{#if isCustomModelLoading}
+										<Loader2 class="h-3.5 w-3.5 animate-spin mr-1.5" />
+										Loading
+									{:else}
+										Load
+									{/if}
+								</button>
+							</form>
+						</div>
 					</div>
 				</Sheet.Content>
 			</Sheet.Root>
@@ -176,7 +231,7 @@
 				class={[
 					`inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-background px-1.5 py-1 text-xs shadow-sm transition hover:bg-muted-foreground/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-muted-foreground/15 dark:text-secondary-foreground`,
 					!ms.isCurrentModelInCache
-						? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
+						? 'bg-neutral-400/10 !text-neutral-500 hover:bg-neutral-400/20 hover:text-neutral-500'
 						: forceForegroundText
 							? 'text-foreground'
 							: ms.isHighlightedCurrentModelActive

@@ -1,0 +1,10 @@
+{
+    "openai": {
+        "id": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "api_keys": [
+            "sk-9876543210fedcba"
+        ]
+    }
+}

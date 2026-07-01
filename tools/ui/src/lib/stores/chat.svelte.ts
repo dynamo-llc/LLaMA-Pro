@@ -19,6 +19,7 @@ import { config } from '$lib/stores/settings.svelte';
 import { agenticStore } from '$lib/stores/agentic.svelte';
 import { mcpStore } from '$lib/stores/mcp.svelte';
 import { contextSize, isRouterMode } from '$lib/stores/server.svelte';
+import { sessionTelemetryStore } from '$lib/stores/session-telemetry.svelte';
 import {
 	selectedModelName,
 	modelsStore,
@@ -779,6 +780,15 @@ class ChatStore {
 				};
 				if (timings) uiUpdate.timings = timings;
 				if (resolvedModel) uiUpdate.model = resolvedModel;
+				if (timings && timings.predicted_n && timings.predicted_ms) {
+					sessionTelemetryStore.addTiming(
+						resolvedModel,
+						timings.predicted_n,
+						timings.predicted_ms,
+						timings.prompt_n,
+						timings.prompt_ms
+					);
+				}
 				conversationsStore.updateMessageAtIndex(idx, uiUpdate);
 				await conversationsStore.updateCurrentNode(currentMessageId);
 			},
@@ -946,6 +956,15 @@ class ChatStore {
 					};
 					if (timings) uiUpdate.timings = timings;
 					if (resolvedModel) uiUpdate.model = resolvedModel;
+					if (timings && timings.predicted_n && timings.predicted_ms) {
+						sessionTelemetryStore.addTiming(
+							resolvedModel,
+							timings.predicted_n,
+							timings.predicted_ms,
+							timings.prompt_n,
+							timings.prompt_ms
+						);
+					}
 					conversationsStore.updateMessageAtIndex(idx, uiUpdate);
 					await conversationsStore.updateCurrentNode(currentMessageId);
 					cleanupStreamingState();
@@ -1461,6 +1480,16 @@ class ChatStore {
 							timestamp: Date.now(),
 							timings
 						});
+
+						if (timings && timings.predicted_n && timings.predicted_ms) {
+							sessionTelemetryStore.addTiming(
+								msg.model || 'unknown',
+								timings.predicted_n,
+								timings.predicted_ms,
+								timings.prompt_n,
+								timings.prompt_ms
+							);
+						}
 
 						conversationsStore.updateConversationTimestamp();
 

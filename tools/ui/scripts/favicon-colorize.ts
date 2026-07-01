@@ -92,16 +92,8 @@ export function padFaviconSvg(svg: string, padding: number): string {
 export function writeThemeFavicons(
 	lightColor: string,
 	darkColor: string,
-	{
-		sourcePath = DEFAULT_LOGO,
-		lightOutPath = DEFAULT_OUT_LIGHT,
-		darkOutPath = DEFAULT_OUT_DARK,
-		padding = 0
-	}: WriteThemeFaviconsOptions = {}
+	options: WriteThemeFaviconsOptions = {}
 ): void {
-	const source = readFileSync(sourcePath, 'utf-8');
-	const { light, dark } = colorizeFaviconSvg(source, lightColor, darkColor);
-	mkdirSync(dirname(lightOutPath), { recursive: true });
-	writeFileSync(lightOutPath, padFaviconSvg(light, padding));
-	writeFileSync(darkOutPath, padFaviconSvg(dark, padding));
+	// Skip auto-colorizing as we are using a custom PNG icon
+	return;
 }

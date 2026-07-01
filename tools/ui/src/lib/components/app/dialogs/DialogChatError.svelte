@@ -20,11 +20,11 @@
 			? 'The request did not receive a response from the server before timing out.'
 			: 'The server responded with an error message. Review the details below.'
 	);
-	const iconClass = $derived(isTimeout ? 'text-destructive' : 'text-amber-500');
+	const iconClass = $derived(isTimeout ? 'text-destructive' : 'text-neutral-500');
 	const badgeClass = $derived(
 		isTimeout
 			? 'border-destructive/40 bg-destructive/10 text-destructive'
-			: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+			: 'border-neutral-500/40 bg-neutral-500/10 text-neutral-600 dark:text-neutral-400'
 	);
 
 	function handleOpenChange(newOpen: boolean) {

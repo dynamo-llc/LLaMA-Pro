@@ -653,6 +653,11 @@ static hf_cache::hf_file find_best_model(const hf_cache::hf_files & files,
     }
 
     for (const auto & t : tags) {
+        for (const auto & f : files) {
+            if (f.path == t) {
+                return f;
+            }
+        }
         std::regex pattern(t + "[.-]", std::regex::icase);
         for (const auto & f : files) {
             if (gguf_filename_is_model(f.path) &&
@@ -1006,13 +1011,17 @@ std::vector<common_cached_model_info> common_list_cached_models() {
 
     for (const auto & f : files) {
         auto split = get_gguf_split_info(f.path);
-        if (split.index != 1 || split.tag.empty() ||
+        if (split.index != 1 || 
             split.prefix.find("mmproj") != std::string::npos ||
             split.prefix.find("mtp-")   != std::string::npos) {
             continue;
         }
-        if (seen.insert(f.repo_id + ":" + split.tag).second) {
-            result.push_back({f.repo_id, split.tag});
+        if (f.repo_id != "local/models" && split.tag.empty()) {
+            continue;
+        }
+        std::string tag = split.tag.empty() ? f.path : split.tag;
+        if (seen.insert(f.repo_id + ":" + tag).second) {
+            result.push_back({f.repo_id, tag});
         }
     }
 

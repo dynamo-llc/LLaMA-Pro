@@ -5,15 +5,26 @@
 	interface Props {
 		serverId: string;
 		serverUrl: string;
+		serverName?: string;
 		serverUseProxy?: boolean;
-		onSave: (url: string, headers: string, useProxy: boolean) => void;
+		onSave: (url: string, headers: string, useProxy: boolean, name?: string) => void;
 		onCancel: () => void;
 	}
 
-	let { serverId, serverUrl, serverUseProxy = false, onSave, onCancel }: Props = $props();
+	let {
+		serverId,
+		serverUrl,
+		serverName = '',
+		serverUseProxy = false,
+		onSave,
+		onCancel
+	}: Props = $props();
+
+	import { untrack } from 'svelte';
 
 	let editUrl = $derived(serverUrl);
 	let editHeaders = $state('');
+	let editName = $state(untrack(() => serverName));
 	let editUseProxy = $derived(serverUseProxy);
 
 	let urlError = $derived.by(() => {
@@ -30,13 +41,14 @@
 
 	function handleSave() {
 		if (!canSave) return;
-		onSave(editUrl.trim(), editHeaders.trim(), editUseProxy);
+		onSave(editUrl.trim(), editHeaders.trim(), editUseProxy, editName.trim());
 	}
 
-	export function setInitialValues(url: string, headers: string, useProxy: boolean) {
+	export function setInitialValues(url: string, headers: string, useProxy: boolean, name?: string) {
 		editUrl = url;
 		editHeaders = headers;
 		editUseProxy = useProxy;
+		editName = name || '';
 	}
 </script>
 
@@ -44,9 +56,11 @@
 	<p class="font-medium">Configure Server</p>
 
 	<McpServerForm
+		name={editName}
 		url={editUrl}
 		headers={editHeaders}
 		useProxy={editUseProxy}
+		onNameChange={(v) => (editName = v)}
 		onUrlChange={(v) => (editUrl = v)}
 		onHeadersChange={(v) => (editHeaders = v)}
 		onUseProxyChange={(v) => (editUseProxy = v)}

@@ -980,4 +980,28 @@ static void test_tagged_peg_parser(testing & t) {
         t.assert_equal("fun_pre should be '<function='", "<function=", result.tags["fun_pre"]);
         t.assert_equal("fun_post should be '>'", ">", result.tags["fun_post"]);
     });
+
+    t.test("gemma4 reasoning partial parse", [&](testing & t) {
+        auto parser = build_chat_peg_parser([&](common_chat_peg_builder & p) {
+            auto start = p.rule("start", p.optional(p.literal("<|turn>model\n")));
+            p.rule("thought", p.literal("<|channel>thought") + p.space() + p.reasoning(p.until("<channel|>")) + p.literal("<channel|>"));
+            auto consume_empty_channels = p.gbnf(p.zero_or_more(p.literal("<|channel>") + p.negate(p.literal("thought"))), "");
+            auto thought = (p.peek(p.literal("<|channel>")) + consume_empty_channels + p.ref("thought")) | p.negate(p.literal("<|channel>"));
+            auto content = p.rule("content", p.content(p.until_one_of({ "<|channel>", "<channel|>" })));
+            auto message = p.rule("message", thought + content);
+            return start + p.one_or_more(message);
+        });
+
+        common_chat_parser_params chat_parser_params;
+        chat_parser_params.format = COMMON_CHAT_FORMAT_PEG_GEMMA4;
+
+        std::string input = "<|channel>thought\nI'm thinking";
+        try {
+            common_chat_msg msg = common_chat_peg_parse(parser, input, true, chat_parser_params);
+            t.assert_equal("reasoning", "I'm thinking", msg.reasoning_content);
+        } catch (const std::exception & e) {
+            t.assert_true(std::string("crashed with: ") + e.what(), false);
+        }
+    });
 }
+
