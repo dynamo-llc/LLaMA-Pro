@@ -16,6 +16,8 @@
 #include <exception>
 #include <signal.h>
 #include <thread> // for std::thread::hardware_concurrency
+#include <fstream>
+#include <memory>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -329,6 +331,79 @@ int llama_server(int argc, char ** argv) {
         routes.post_orchestra_chat_completions = [proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); };
         routes.post_swarm_chat_completions     = [proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); };
     }
+    ctx_http.get ("/api/logs/stream",          ex_wrapper([](const server_http_req & req) -> server_http_res_ptr {
+        auto res = std::make_unique<server_http_res>();
+        res->status = 200;
+        res->content_type = "text/event-stream";
+        
+        auto f_ptr = std::make_shared<std::ifstream>("server.log", std::ios::binary);
+        if (f_ptr->is_open()) {
+            f_ptr->seekg(0, std::ios::end);
+            auto file_size = f_ptr->tellg();
+            auto chunk_size = 8192;
+            if (file_size > chunk_size) {
+                f_ptr->seekg(file_size - (std::streamoff)chunk_size);
+            } else {
+                f_ptr->seekg(0);
+            }
+            if (file_size > chunk_size) {
+                std::string dummy;
+                std::getline(*f_ptr, dummy);
+            }
+        }
+
+        auto sent_init = std::make_shared<bool>(false);
+
+        res->next = [f_ptr, sent_init, &req](std::string & output) -> bool {
+            if (req.should_stop()) {
+                return false;
+            }
+            
+            if (!f_ptr->is_open()) {
+                f_ptr->open("server.log", std::ios::binary);
+                if (!f_ptr->is_open()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    output = "";
+                    return true;
+                }
+            }
+
+            if (!*sent_init) {
+                std::string line;
+                std::vector<std::string> init_lines;
+                while (std::getline(*f_ptr, line)) {
+                    init_lines.push_back(line);
+                }
+                if (init_lines.size() > 50) {
+                    init_lines.erase(init_lines.begin(), init_lines.end() - 50);
+                }
+                std::string tail_data;
+                for (const auto & l : init_lines) {
+                    if (!l.empty()) {
+                        tail_data += "data: " + l + "\n\n";
+                    }
+                }
+                output = tail_data;
+                *sent_init = true;
+                return true;
+            }
+
+            std::string line;
+            if (std::getline(*f_ptr, line)) {
+                output = "data: " + line + "\n\n";
+                return true;
+            }
+
+            if (f_ptr->eof()) {
+                f_ptr->clear();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            output = "";
+            return true;
+        };
+        return res;
+    }));
+
     ctx_http.get ("/health",                   ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/v1/health",                ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/metrics",                  ex_wrapper(routes.get_metrics));

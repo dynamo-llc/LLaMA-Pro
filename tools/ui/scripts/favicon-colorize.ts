@@ -95,5 +95,26 @@ export function writeThemeFavicons(
 	options: WriteThemeFaviconsOptions = {}
 ): void {
 	// Skip auto-colorizing as we are using a custom PNG icon
-	return;
+	// However, if custom output paths are provided (e.g. by unit tests), proceed with generation.
+	if (!options.sourcePath && !options.lightOutPath && !options.darkOutPath) {
+		return;
+	}
+
+	const sourcePath = options.sourcePath ?? DEFAULT_LOGO;
+	const lightOutPath = options.lightOutPath ?? DEFAULT_OUT_LIGHT;
+	const darkOutPath = options.darkOutPath ?? DEFAULT_OUT_DARK;
+
+	const sourceSvg = readFileSync(sourcePath, 'utf-8');
+	let { light, dark } = colorizeFaviconSvg(sourceSvg, lightColor, darkColor);
+
+	if (options.padding && options.padding > 0) {
+		light = padFaviconSvg(light, options.padding);
+		dark = padFaviconSvg(dark, options.padding);
+	}
+
+	mkdirSync(dirname(lightOutPath), { recursive: true });
+	mkdirSync(dirname(darkOutPath), { recursive: true });
+
+	writeFileSync(lightOutPath, light);
+	writeFileSync(darkOutPath, dark);
 }

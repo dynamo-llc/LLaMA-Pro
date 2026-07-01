@@ -12,7 +12,6 @@
 </script>
 
 <div class="sticky top-2 hidden w-64 flex-col self-start bg-background py-4 md:flex gap-6">
-
 	<nav class="space-y-1">
 		{#each sections as section (section.title)}
 			{#if getHref}

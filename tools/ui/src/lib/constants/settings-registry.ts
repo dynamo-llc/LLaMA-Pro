@@ -12,7 +12,9 @@ import {
 	Database,
 	Monitor as MonitorIcon,
 	Sun,
-	Moon
+	Moon,
+	Target,
+	Globe
 } from '@lucide/svelte';
 import type { Component } from 'svelte';
 import type {
@@ -38,7 +40,9 @@ export const SETTINGS_SECTION_TITLES = {
 	TOOLS: 'Tools',
 	MCP: 'MCP',
 	IMPORT_EXPORT: 'Import/Export',
-	DEVELOPER: 'Developer'
+	DEVELOPER: 'Developer',
+	ECHO: 'Echo Alignment',
+	MESH: 'Mesh Network'
 } as const;
 
 const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Component }[] = [
@@ -47,6 +51,16 @@ const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Co
 		title: SETTINGS_SECTION_TITLES.IMPORT_EXPORT,
 		slug: SETTINGS_SECTION_SLUGS.IMPORT_EXPORT,
 		icon: Database
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.ECHO,
+		slug: SETTINGS_SECTION_SLUGS.ECHO,
+		icon: Target
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.MESH,
+		slug: SETTINGS_SECTION_SLUGS.MESH,
+		icon: Globe
 	}
 ];
 
@@ -823,15 +837,7 @@ const NON_UI_SETTINGS: SettingsEntry[] = [
 				useProxy: true,
 				requestTimeoutSeconds: 30
 			},
-			{
-				id: 'preset-figma',
-				name: 'Figma',
-				url: 'http://localhost:8013/sse',
-				enabled: true,
-				useProxy: true,
-				requestTimeoutSeconds: 30,
-				headers: '{\n  "Figma-Token": "YOUR_FIGMA_PERSONAL_ACCESS_TOKEN"\n}'
-			},
+
 			{
 				id: 'preset-playwright',
 				name: 'Playwright',

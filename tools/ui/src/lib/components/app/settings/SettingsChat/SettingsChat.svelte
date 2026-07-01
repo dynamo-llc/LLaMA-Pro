@@ -5,6 +5,8 @@
 		SettingsChatImportExportTab,
 		SettingsChatMobileHeader,
 		SettingsChatToolsTab,
+		SettingsChatEchoTab,
+		SettingsLatticaTab,
 		SettingsFooter
 	} from '$lib/components/app/settings';
 	import { config, settingsStore } from '$lib/stores/settings.svelte';
@@ -146,12 +148,14 @@
 		<div class="mx-auto max-w-3xl flex-1">
 			<div class="space-y-6 p-4 md:p-6 md:pt-8">
 				<div class="grid">
-
-
 					{#if currentSection.title === SETTINGS_SECTION_TITLES.TOOLS}
 						<SettingsChatToolsTab />
 					{:else if currentSection.title === SETTINGS_SECTION_TITLES.IMPORT_EXPORT}
 						<SettingsChatImportExportTab />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.ECHO}
+						<SettingsChatEchoTab />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.MESH}
+						<SettingsLatticaTab />
 					{:else if currentSection.fields}
 						<div class="space-y-6">
 							<SettingsChatFields

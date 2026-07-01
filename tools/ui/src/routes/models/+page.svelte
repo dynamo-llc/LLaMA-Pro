@@ -125,12 +125,12 @@
 					const conf = swarmConfigs.find((c) => c.id === selectedId);
 					if (conf) {
 						toast.success(`Activated Swarm: ${conf.name}`);
-						
+
 						// Propagate active model slots
 						const localModels = conf.nodes
 							.filter((n: any) => n.sourceType === 'local' && n.modelName)
 							.map((n: any) => n.modelName);
-						
+
 						if (localModels.length > 0) {
 							toast.info(`Propagating ${localModels.length} local model(s) to active slots...`);
 							for (const modelId of localModels) {
@@ -147,7 +147,7 @@
 				} else {
 					toast.success('Swarm deactivated');
 				}
-				
+
 				// Automatically update the IDE
 				await handleUpdateIde();
 			} else {
@@ -1080,7 +1080,6 @@
 />
 
 <div class="mx-auto w-full p-4 md:p-8 md:py-8" in:fade={{ duration: 150 }}>
-
 	<div
 		class="mb-6 rounded-lg border {modelsStore.activeRpcPeers.length > 0
 			? 'border-primary/20 bg-primary/5'
@@ -1832,12 +1831,12 @@
 									{#if isActive}
 										<span
 											class="px-2 py-0.5 rounded-full bg-[#39ff14]/10 text-[#39ff14] border border-[#39ff14]/30 text-[8.5px] font-bold tracking-wider leading-none"
-											>(#{i + 1} ACTIVE)</span
+											>#{i + 1} ACTIVE</span
 										>
 									{:else}
 										<span
 											class="px-2 py-0.5 rounded-full bg-neutral-500/10 text-neutral-400 border border-neutral-500/30 text-[8.5px] font-bold tracking-wider leading-none"
-											>(#{i + 1} OFFLINE)</span
+											>#{i + 1} OFFLINE</span
 										>
 									{/if}
 								{/each}

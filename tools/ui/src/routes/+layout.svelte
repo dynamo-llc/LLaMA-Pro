@@ -47,7 +47,12 @@
 				urlStr = input.url;
 			}
 
-			if (urlStr && !urlStr.startsWith('http://') && !urlStr.startsWith('https://') && !urlStr.startsWith('//')) {
+			if (
+				urlStr &&
+				!urlStr.startsWith('http://') &&
+				!urlStr.startsWith('https://') &&
+				!urlStr.startsWith('//')
+			) {
 				const dummyBase = `${window.location.protocol}//${window.location.host}${window.location.pathname}`;
 				const resolvedUrl = new URL(urlStr, dummyBase);
 				let pathname = resolvedUrl.pathname;
@@ -57,7 +62,11 @@
 				else if (pathname.endsWith('/health')) pathname = '/health';
 
 				let targetOrigin = 'http://127.0.0.1:8080';
-				if (pathname.startsWith('/api') || pathname.startsWith('/telemetry') || pathname.startsWith('/metrics')) {
+				if (
+					pathname.startsWith('/api') ||
+					pathname.startsWith('/telemetry') ||
+					pathname.startsWith('/metrics')
+				) {
 					targetOrigin = 'http://127.0.0.1:8000';
 				}
 
@@ -346,7 +355,7 @@
 <svelte:window onkeydown={handleKeydown} bind:innerHeight bind:innerWidth />
 
 <Tooltip.Provider delayDuration={TOOLTIP_DELAY_DURATION}>
-	<div class="flex flex-col md:flex-row min-h-screen w-full overflow-x-hidden">
+	<div class="flex flex-col md:flex-row h-screen w-full overflow-hidden">
 		<SidebarNavigation
 			onSearchClick={() => {
 				if (isMobile.current) {
@@ -357,43 +366,78 @@
 			}}
 		/>
 
-		<div class="flex-1 flex flex-col min-h-screen min-w-0">
+		<div class="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
 			<!-- Global Locked Header Area (Sticky) -->
-			<div class="p-2 pb-1 sticky top-0 z-50 bg-background/95 backdrop-blur-md flex flex-col gap-1.5">
-				<div class="bg-card border border-border rounded-xl shadow-sm px-4 py-1.5 flex items-center justify-between min-h-10 md:min-h-12">
+			<div
+				class="p-2 pb-1 sticky top-0 z-50 bg-background/95 backdrop-blur-md flex flex-col gap-1.5"
+			>
+				<div
+					class="bg-card border border-border rounded-xl shadow-sm px-4 py-1.5 flex items-center justify-between min-h-10 md:min-h-12"
+				>
 					<!-- Left: Title Banner -->
 					<div class="flex items-center gap-2">
 						<div class="flex items-center">
-							<img src={`${base}/header-logo.png`} alt="LLaMA Pro" class="h-7 md:h-8.5 object-contain" />
+							<img
+								src={`${base}/header-logo.png`}
+								alt="LLaMA Pro"
+								class="h-6 md:h-7 object-contain"
+							/>
 						</div>
 						<div class="h-3 w-px bg-border"></div>
-						<span class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md">Ai Engine v2.0</span>
+						<span
+							class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md"
+							>Ai Engine v2.0</span
+						>
 					</div>
- 
+
 					<!-- Center: Scrolling News Feed -->
-					<div class="flex-1 mx-3 md:mx-6 overflow-hidden relative bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg h-6 flex items-center font-pixel">
+					<div
+						class="flex-1 mx-3 md:mx-6 overflow-hidden relative bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg h-6 flex items-center font-pixel"
+					>
 						<div class="w-full overflow-hidden relative h-full flex items-center font-pixel">
-							<div class="marquee-content text-zinc-700 dark:text-zinc-300 font-pixel whitespace-nowrap text-[9px] md:text-[10px]">
-								✦ LLaMA Pro Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip: You can extend capabilities with custom MCP server integrations ✦ LLaMA Pro Feature: Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and run the newest, latest, and greatest models from Hugging Face ✦ Feature: Run fully local, private AI models on consumer hardware with ggml quantization ✦
+							<div
+								class="marquee-content text-zinc-700 dark:text-zinc-300 font-pixel whitespace-nowrap text-[9px] md:text-[10px]"
+							>
+								✦ LLaMA Pro Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip:
+								You can extend capabilities with custom MCP server integrations ✦ LLaMA Pro Feature:
+								Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and
+								run the newest, latest, and greatest models from Hugging Face ✦ Feature: Run fully
+								local, private AI models on consumer hardware with ggml quantization ✦
 							</div>
 						</div>
 					</div>
- 
+
 					<!-- Right: Token Speed Telemetry -->
 					<div class="flex items-center gap-2">
-						<div class="bg-muted/85 border border-border/70 rounded-md px-2 py-0.5 flex items-center gap-1.5 shadow-xs text-[9px] md:text-[10px] font-mono">
-							<span class="text-muted-foreground uppercase text-[8px] md:text-[9px] font-semibold">Speed</span>
-							<span class="font-bold text-foreground">{sessionTelemetryStore.latestSpeed > 0 ? sessionTelemetryStore.latestSpeed.toFixed(1) + ' t/s' : '---'}</span>
+						<div
+							class="bg-muted/85 border border-border/70 rounded-md px-2 py-0.5 flex items-center gap-1.5 shadow-xs text-[9px] md:text-[10px] font-mono"
+						>
+							<span class="text-muted-foreground uppercase text-[8px] md:text-[9px] font-semibold"
+								>Speed</span
+							>
+							<span class="font-bold text-foreground"
+								>{sessionTelemetryStore.latestSpeed > 0
+									? sessionTelemetryStore.latestSpeed.toFixed(1) + ' t/s'
+									: '---'}</span
+							>
 							<div class="h-2.5 w-px bg-border mx-0.5"></div>
-							<span class="text-muted-foreground uppercase text-[8px] md:text-[9px] font-semibold">Avg</span>
-							<span class="font-bold text-pink-500 dark:text-pink-400">{sessionTelemetryStore.getAverageSpeed() > 0 ? sessionTelemetryStore.getAverageSpeed().toFixed(1) + ' t/s' : '---'}</span>
+							<span class="text-muted-foreground uppercase text-[8px] md:text-[9px] font-semibold"
+								>Avg</span
+							>
+							<span class="font-bold text-pink-500 dark:text-pink-400"
+								>{sessionTelemetryStore.getAverageSpeed() > 0
+									? sessionTelemetryStore.getAverageSpeed().toFixed(1) + ' t/s'
+									: '---'}</span
+							>
 						</div>
 					</div>
 				</div>
 
 				<!-- Global Locked Submenu Header Area (Sticky, locked directly below title bar) -->
 				{#if activeSubmenu}
-					<div class="w-full border-b border-border/50 py-1 flex items-center justify-center bg-card rounded-lg shadow-xs">
+					<div
+						class="w-full border-b border-border/50 py-1 flex items-center justify-center bg-card rounded-lg shadow-xs"
+					>
 						<div class="flex items-center gap-2 text-foreground font-sans">
 							{#if activeSubmenu.icon}
 								{@const Icon = activeSubmenu.icon}
@@ -408,7 +452,7 @@
 			</div>
 
 			<!-- Main Page Content -->
-			<div class="flex-1 flex flex-col min-h-0">
+			<div class="flex-1 overflow-y-auto min-h-0 main-content-scroll">
 				{@render children?.()}
 			</div>
 		</div>

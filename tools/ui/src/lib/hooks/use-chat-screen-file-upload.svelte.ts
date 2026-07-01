@@ -97,7 +97,12 @@ export function useChatScreenFileUpload(options: UseChatScreenFileUploadOptions)
 		set showFileErrorDialog(value) {
 			showFileErrorDialog = value;
 		},
-		fileErrorData,
+		get fileErrorData() {
+			return fileErrorData;
+		},
+		set fileErrorData(value) {
+			fileErrorData = value;
+		},
 		handleFileUpload,
 		handleFileRemove
 	};

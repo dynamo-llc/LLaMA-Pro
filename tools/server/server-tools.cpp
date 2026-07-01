@@ -239,9 +239,14 @@ struct server_tool_file_glob_search : server_tool {
         size_t count = 0;
 
         std::error_code ec;
-        for (const auto & entry : fs::recursive_directory_iterator(base,
-                fs::directory_options::skip_permission_denied, ec)) {
-            if (!entry.is_regular_file()) continue;
+        for (auto it = fs::recursive_directory_iterator(base,
+                fs::directory_options::skip_permission_denied, ec);
+             it != fs::recursive_directory_iterator();
+             it.increment(ec)) {
+            if (ec) break;
+            const auto & entry = *it;
+            std::error_code entry_ec;
+            if (!entry.is_regular_file(entry_ec)) continue;
 
             std::string rel = fs::relative(entry.path(), base, ec).string();
             if (ec) continue;
@@ -335,9 +340,14 @@ struct server_tool_grep_search : server_tool {
         if (fs::is_regular_file(path, ec)) {
             search_file(path);
         } else if (fs::is_directory(path, ec)) {
-            for (const auto & entry : fs::recursive_directory_iterator(path,
-                    fs::directory_options::skip_permission_denied, ec)) {
-                if (!entry.is_regular_file()) continue;
+            for (auto it = fs::recursive_directory_iterator(path,
+                    fs::directory_options::skip_permission_denied, ec);
+                 it != fs::recursive_directory_iterator();
+                 it.increment(ec)) {
+                if (ec) break;
+                const auto & entry = *it;
+                std::error_code entry_ec;
+                if (!entry.is_regular_file(entry_ec)) continue;
                 if (total >= SERVER_TOOL_GREP_SEARCH_MAX_RESULTS) break;
 
                 std::string rel = fs::relative(entry.path(), path, ec).string();

@@ -1,6 +1,6 @@
 [Setup]
 AppName=LLaMA Pro
-AppVersion=1.0.0
+AppVersion=2.0.1
 DefaultDirName={localappdata}\LLaMA Pro
 DefaultGroupName=LLaMA Pro
 OutputDir=dist-installer
@@ -9,6 +9,9 @@ SetupIconFile=..\ui\static\favicon.ico
 Compression=lzma
 SolidCompression=yes
 DisableProgramGroupPage=yes
+DisableDirPage=no
+UsePreviousAppDir=no
+UsePreviousTasks=no
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 
@@ -27,9 +30,12 @@ Source: "..\orchestrator\swarm_configs.json"; DestDir: "{app}\bin"; Flags: ignor
 ; Copy local MCP server directories
 Source: "..\mcp\*"; DestDir: "{app}\tools\mcp"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "node_modules\.bin\*"
 
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
 [Icons]
 Name: "{group}\LLaMA Pro"; Filename: "{app}\LLaMA Pro.exe"
-Name: "{autodesktop}\LLaMA Pro"; Filename: "{app}\LLaMA Pro.exe"; IconFilename: "{app}\LLaMA Pro.exe"
+Name: "{autodesktop}\LLaMA Pro"; Filename: "{app}\LLaMA Pro.exe"; IconFilename: "{app}\LLaMA Pro.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\LLaMA Pro.exe"; Description: "Launch LLaMA Pro"; Flags: nowait postinstall skipifsilent

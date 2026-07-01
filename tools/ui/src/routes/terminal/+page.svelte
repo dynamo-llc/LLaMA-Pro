@@ -5,13 +5,36 @@
 
 	let logs: string[] = $state([]);
 	let terminalContainer: HTMLDivElement | null = null;
+	let terminalWrapper: HTMLDivElement | null = null;
 	let eventSource: EventSource | null = null;
 	let autoScroll = $state(true);
+	let availableHeight = $state(0);
+
+	let resizeObserver: ResizeObserver | null = null;
 
 	onMount(() => {
+		// Measure the parent scroll container height and keep the terminal bounded to it
+		const scrollParent = document.querySelector('.main-content-scroll') as HTMLElement | null;
+		if (scrollParent) {
+			const updateHeight = () => {
+				availableHeight = scrollParent.clientHeight;
+			};
+			updateHeight();
+			resizeObserver = new ResizeObserver(updateHeight);
+			resizeObserver.observe(scrollParent);
+		}
+
 		// Initialize SSE connection to the backend logs stream
-		const host = window.location.hostname || 'localhost';
-		eventSource = new EventSource(`http://${host}:8000/api/logs/stream`);
+		let host = window.location.hostname;
+		if (
+			!host ||
+			host === '-' ||
+			(window.location.protocol !== 'http:' && window.location.protocol !== 'https:')
+		) {
+			host = '127.0.0.1';
+		}
+		let port = window.location.port || '8080';
+		eventSource = new EventSource(`http://${host}:${port}/api/logs/stream`);
 
 		eventSource.onmessage = (event) => {
 			logs = [...logs, event.data];
@@ -35,7 +58,7 @@
 			// Attempt to reconnect after 5 seconds
 			setTimeout(() => {
 				if (document.visibilityState === 'visible') {
-					eventSource = new EventSource(`http://${host}:8000/api/logs/stream`);
+					eventSource = new EventSource(`http://${host}:${port}/api/logs/stream`);
 				}
 			}, 5000);
 		};
@@ -44,6 +67,9 @@
 	onDestroy(() => {
 		if (eventSource) {
 			eventSource.close();
+		}
+		if (resizeObserver) {
+			resizeObserver.disconnect();
 		}
 	});
 
@@ -56,15 +82,18 @@
 	}
 </script>
 
-<div class="w-full p-4 md:p-8 flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
-
+<div
+	class="w-full p-4 md:p-8 flex flex-col gap-4 overflow-hidden"
+	bind:this={terminalWrapper}
+	style={availableHeight > 0 ? `height: ${availableHeight}px;` : 'height: 100dvh;'}
+>
 	<!-- Terminal UI Container -->
 	<div
-		class="relative flex-1 bg-[#f3f4f6] border border-[#d1d5db] rounded-xl shadow-2xl overflow-hidden flex flex-col"
+		class="relative flex-1 bg-[#f3f4f6] border border-[#d1d5db] rounded-xl shadow-2xl overflow-hidden flex flex-col min-h-0"
 	>
 		<!-- Mac-style Window Header -->
 		<div
-			class="h-10 bg-[#d1d5db] border-b border-[#9ca3af] flex items-center px-4 justify-between select-none"
+			class="h-10 bg-[#d1d5db] border-b border-[#9ca3af] flex items-center px-4 justify-between select-none shrink-0"
 		>
 			<div class="flex gap-2">
 				<div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div>

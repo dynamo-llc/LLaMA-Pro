@@ -10,7 +10,9 @@ export const SETTINGS_SECTION_SLUGS = {
 	DEVELOPER: 'developer',
 	MCP: 'mcp',
 	TOOLS: 'tools',
-	IMPORT_EXPORT: 'import-export'
+	IMPORT_EXPORT: 'import-export',
+	ECHO: 'echo',
+	MESH: 'mesh'
 } as const;
 
 export const ROUTES = {

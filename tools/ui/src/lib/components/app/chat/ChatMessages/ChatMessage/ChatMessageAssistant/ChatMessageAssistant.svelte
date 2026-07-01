@@ -14,7 +14,8 @@
 	import { AgenticSectionType } from '$lib/enums';
 	import { REASONING_TAGS } from '$lib/constants/agentic';
 	import { tick } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import { fade, slide } from 'svelte/transition';
+	import { Send, X, Check } from '@lucide/svelte';
 	import { MessageRole, ChatMessageStatsView } from '$lib/enums';
 	import { config } from '$lib/stores/settings.svelte';
 	import { isRouterMode } from '$lib/stores/server.svelte';
@@ -210,6 +211,12 @@
 			isLastAssistantMessage
 	);
 
+	let showFeedbackForm = $state(false);
+	let showFeedbackSuccess = $state(false);
+	let isThumbsUpActive = $state(false);
+	let isThumbsDownActive = $state(false);
+	let rewriteContent = $state('');
+
 	let assistantEl: HTMLDivElement | undefined = $state();
 	let lastUserMessageHeight = $state(0);
 	let assistantMarginTop = $state(0);
@@ -396,7 +403,86 @@
 			showRawOutputSwitch={currentConfig.showRawOutputSwitch}
 			rawOutputEnabled={showRawOutput}
 			onRawOutputToggle={(enabled) => (showRawOutput = enabled)}
+			onThumbsUp={async () => {
+				isThumbsUpActive = true;
+				isThumbsDownActive = false;
+				const { activeConversation, conversationsStore } = await import('$lib/stores/conversations.svelte');
+				const conversation = activeConversation();
+				if (!conversation) return;
+				const messages = await conversationsStore.getConversationMessages(conversation.id);
+				const idx = messages.findIndex(m => m.id === message.id);
+				let prompt = "Unknown prompt";
+				if (idx > 0 && messages[idx - 1].role === MessageRole.USER) {
+					prompt = messages[idx - 1].content;
+				}
+				fetch('http://127.0.0.1:50054/feedback', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ prompt, chosen: message.content, rejected: '' })
+				}).then(() => {
+					showFeedbackSuccess = true;
+					setTimeout(() => showFeedbackSuccess = false, 2000);
+				}).catch(console.error);
+			}}
+			onThumbsDown={() => {
+				isThumbsDownActive = true;
+				isThumbsUpActive = false;
+				showFeedbackForm = true;
+			}}
+			{isThumbsUpActive}
+			{isThumbsDownActive}
 		/>
+	{/if}
+
+	{#if showFeedbackSuccess}
+		<div class="mt-2 text-xs text-green-500 flex items-center gap-1" in:fade out:fade>
+			<Check class="w-3 h-3" /> ✨ Feedback recorded
+		</div>
+	{/if}
+
+	{#if showFeedbackForm}
+		<div class="mt-4 flex flex-col gap-2 rounded-xl bg-muted/30 p-4 border border-border" transition:slide={{ duration: 200 }}>
+			<label for="rewrite" class="text-sm font-medium">Provide a better response (optional):</label>
+			<textarea
+				id="rewrite"
+				bind:value={rewriteContent}
+				class="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+				placeholder="Rewrite the response here..."
+			></textarea>
+			<div class="flex justify-end gap-2 mt-2">
+				<button 
+					class="flex items-center gap-1 text-xs hover:bg-muted px-2 py-1 rounded transition-colors text-muted-foreground" 
+					onclick={() => { showFeedbackForm = false; isThumbsDownActive = false; }}
+				>
+					<X class="w-3 h-3" /> Cancel
+				</button>
+				<button 
+					class="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
+					onclick={async () => {
+						const { activeConversation, conversationsStore } = await import('$lib/stores/conversations.svelte');
+						const conversation = activeConversation();
+						if (!conversation) return;
+						const messages = await conversationsStore.getConversationMessages(conversation.id);
+						const idx = messages.findIndex(m => m.id === message.id);
+						let prompt = "Unknown prompt";
+						if (idx > 0 && messages[idx - 1].role === MessageRole.USER) {
+							prompt = messages[idx - 1].content;
+						}
+						fetch('http://127.0.0.1:50054/feedback', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ prompt, chosen: rewriteContent, rejected: message.content })
+						}).then(() => {
+							showFeedbackSuccess = true;
+							setTimeout(() => showFeedbackSuccess = false, 2000);
+						}).catch(console.error);
+						showFeedbackForm = false;
+					}}
+				>
+					<Send class="w-3 h-3" /> Submit Feedback
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>
 

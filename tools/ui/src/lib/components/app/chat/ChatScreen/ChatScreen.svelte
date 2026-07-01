@@ -226,6 +226,24 @@
 		handleMobileScroll();
 	});
 
+	$effect(() => {
+		const container = scroll.chatScrollContainer;
+		if (!container) return;
+
+		const onScroll = (e: Event) => {
+			scroll.handleScroll(e as UIEvent);
+			handleMobileScroll();
+			if (e.isTrusted && Date.now() > mobileScrollDownHintLockedUntil) {
+				mobileScrollDownHint = false;
+			}
+		};
+
+		container.addEventListener('scroll', onScroll, { passive: true });
+		return () => {
+			container.removeEventListener('scroll', onScroll);
+		};
+	});
+
 	onDestroy(() => autoScroll.destroy());
 </script>
 
@@ -233,16 +251,7 @@
 	<ChatScreenDragOverlay />
 {/if}
 
-<svelte:window
-	onkeydown={handleKeydown}
-	onscroll={(e) => {
-		scroll.handleScroll(e);
-		handleMobileScroll();
-		if (e.isTrusted && Date.now() > mobileScrollDownHintLockedUntil) {
-			mobileScrollDownHint = false;
-		}
-	}}
-/>
+<svelte:window onkeydown={handleKeydown} />
 
 {#if isServerLoading}
 	<ServerLoadingSplash />

@@ -34,7 +34,8 @@ export function useChatScreenScroll(autoScroll: AutoScrollController) {
 	});
 
 	$effect(() => {
-		chatScrollContainer = document.documentElement;
+		chatScrollContainer =
+			(document.querySelector('.main-content-scroll') as HTMLElement) || document.documentElement;
 		autoScroll.setContainer(chatScrollContainer);
 	});
 

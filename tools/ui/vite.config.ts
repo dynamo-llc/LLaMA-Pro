@@ -15,7 +15,8 @@ import { SVELTEKIT_PWA_OPTIONS } from './src/lib/constants/pwa';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SERVER_ORIGIN = import.meta.env?.VITE_PUBLIC_SERVER_ORIGIN || 'http://localhost:8080';
-const ORCHESTRATOR_ORIGIN = import.meta.env?.VITE_PUBLIC_ORCHESTRATOR_ORIGIN || 'http://localhost:8000';
+const ORCHESTRATOR_ORIGIN =
+	import.meta.env?.VITE_PUBLIC_ORCHESTRATOR_ORIGIN || 'http://localhost:8000';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const browserBaseConfig: any = {

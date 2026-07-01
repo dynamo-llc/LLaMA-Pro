@@ -11,6 +11,7 @@
 	import { ROUTES } from '$lib/constants';
 	import { fade } from 'svelte/transition';
 
+	import { base } from '$app/paths';
 	import { useKeyboardShortcuts } from '$lib/hooks/use-keyboard-shortcuts.svelte';
 	import { conversationsStore, conversations } from '$lib/stores/conversations.svelte';
 	import { chatStore } from '$lib/stores/chat.svelte';
@@ -30,10 +31,15 @@
 	let isServerAlive = $state(false);
 	let healthCheckFailed = $state(false);
 	let activeInferenceCount = $state(0);
+	
+	let latticaPeerCount = $state(0);
+	let isContributingCompute = $state(false);
+	let isUsingMeshInference = $state(false);
+	let isBackendRestarting = $state(false);
 
 	async function checkServerHealth() {
 		try {
-			const res = await fetch('./telemetry/app', { cache: 'no-store' });
+			const res = await fetch(`${base}/telemetry/app`, { cache: 'no-store' });
 			if (res.ok) {
 				isServerAlive = true;
 				healthCheckFailed = false;
@@ -48,6 +54,45 @@
 			isServerAlive = false;
 			healthCheckFailed = true;
 			activeInferenceCount = 0;
+		}
+
+		try {
+			const latticaRes = await fetch('http://127.0.0.1:50053/peers');
+			if (latticaRes.ok) {
+				const data = await latticaRes.json();
+				latticaPeerCount = data.count || 0;
+			}
+		} catch (e) {
+			// Lattica daemon might not be running
+			latticaPeerCount = 0;
+		}
+	}
+
+	async function toggleComputeContribution() {
+		if (typeof window !== 'undefined' && (window as any).electronAPI) {
+			isContributingCompute = !isContributingCompute;
+			if (isContributingCompute) {
+				await (window as any).electronAPI.startRpcServer();
+			} else {
+				await (window as any).electronAPI.stopRpcServer();
+			}
+		} else {
+			alert('Compute contribution requires the desktop application.');
+		}
+	}
+
+	async function toggleMeshInference() {
+		if (typeof window !== 'undefined' && (window as any).electronAPI) {
+			isUsingMeshInference = !isUsingMeshInference;
+			isBackendRestarting = true;
+			try {
+				await (window as any).electronAPI.restartBackend({ useMesh: isUsingMeshInference });
+			} finally {
+				// Wait a few seconds for the health checks to naturally recover after backend comes online
+				setTimeout(() => isBackendRestarting = false, 3000);
+			}
+		} else {
+			alert('Mesh Inference requires the desktop application.');
 		}
 	}
 
@@ -79,7 +124,23 @@
 
 	const serverHost = $derived.by(() => {
 		if (typeof window !== 'undefined') {
-			return `${window.location.protocol}//${window.location.hostname}:8000`;
+			let host = window.location.hostname;
+			if (!host || host === '-') {
+				host = '127.0.0.1';
+			}
+			let port = window.location.port || '8080';
+			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:${port}`;
+		}
+		return 'http://localhost:8080';
+	});
+
+	const orchestratorHost = $derived.by(() => {
+		if (typeof window !== 'undefined') {
+			let host = window.location.hostname;
+			if (!host || host === '-') {
+				host = '127.0.0.1';
+			}
+			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:8000`;
 		}
 		return 'http://localhost:8000';
 	});
@@ -112,8 +173,8 @@
 	});
 
 	const endpoint1 = $derived(`${serverHost}/v1/chat/completions`);
-	const endpoint2 = $derived(`${serverHost}/v1/orchestra/chat/completions`);
-	const endpoint3 = $derived(`${serverHost}/v1/swarm/chat/completions`);
+	const endpoint2 = $derived(`${orchestratorHost}/v1/orchestra/chat/completions`);
+	const endpoint3 = $derived(`${orchestratorHost}/v1/swarm/chat/completions`);
 
 	const dotStyle = $derived.by(() => {
 		switch (serverStatus) {
@@ -486,6 +547,57 @@
 							<Copy class="h-3 w-3" />
 						</button>
 					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Lattica Network -->
+		<div class="flex flex-col gap-1.5 pt-2 border-t border-border/40">
+			<span class="text-[10px] text-muted-foreground font-medium uppercase tracking-wider"
+				>Lattica Network</span
+			>
+			<div class="flex flex-col gap-2">
+				<div class="flex items-center justify-between bg-muted/40 rounded-lg p-1.5 border border-border/20">
+					<span class="text-[10px] font-semibold text-foreground/80">Active Peers</span>
+					<span class="font-mono text-[10px] bg-primary/20 text-primary px-1.5 rounded">{latticaPeerCount}</span>
+				</div>
+				
+				<div class="flex items-center justify-between bg-muted/40 rounded-lg p-1.5 border border-border/20">
+					<span class="text-[10px] font-semibold text-foreground/80" title="Serve your GPU compute to the network">Contribute Compute</span>
+					<button 
+						onclick={toggleComputeContribution}
+						class="relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 {isContributingCompute ? 'bg-primary' : 'bg-muted-foreground/30'}"
+						role="switch"
+						aria-checked={isContributingCompute}
+					>
+						<span class="sr-only">Contribute Compute</span>
+						<span
+							aria-hidden="true"
+							class="pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-background shadow ring-0 transition duration-200 ease-in-out {isContributingCompute ? 'translate-x-3.5' : 'translate-x-0'}"
+						/>
+					</button>
+				</div>
+
+				<div class="flex items-center justify-between bg-muted/40 rounded-lg p-1.5 border border-border/20">
+					<span class="text-[10px] font-semibold text-foreground/80" title="Distribute inference across Lattica peers">
+						Use Mesh Inference
+						{#if isBackendRestarting}
+							<span class="ml-1 opacity-70 animate-pulse text-[8px]">(restarting...)</span>
+						{/if}
+					</span>
+					<button 
+						onclick={toggleMeshInference}
+						disabled={isBackendRestarting}
+						class="relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 {isUsingMeshInference ? 'bg-primary' : 'bg-muted-foreground/30'} disabled:opacity-50 disabled:cursor-not-allowed"
+						role="switch"
+						aria-checked={isUsingMeshInference}
+					>
+						<span class="sr-only">Use Mesh Inference</span>
+						<span
+							aria-hidden="true"
+							class="pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-background shadow ring-0 transition duration-200 ease-in-out {isUsingMeshInference ? 'translate-x-3.5' : 'translate-x-0'}"
+						/>
+					</button>
 				</div>
 			</div>
 		</div>

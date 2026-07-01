@@ -80,7 +80,7 @@
 		);
 
 		// Expand sidebar first, then click Search in the expanded button list
-		const logoTrigger = screen.getByRole('button', { name: /expand navigation/i });
+		const logoTrigger = screen.getByRole('button', { name: /search/i });
 		await userEvent.click(logoTrigger);
 		const searchTrigger = screen.getByText('Search');
 		userEvent.click(searchTrigger);

@@ -74,3 +74,6 @@ export { default as SettingsChatFields } from './SettingsChat/SettingsChatFields
  * server favicons and permission management controls.
  */
 export { default as SettingsChatToolsTab } from './SettingsChat/SettingsChatToolsTab.svelte';
+
+export { default as SettingsChatEchoTab } from './SettingsChat/SettingsChatEchoTab.svelte';
+export { default as SettingsLatticaTab } from './SettingsChat/SettingsLatticaTab.svelte';

@@ -42,9 +42,9 @@
 				const data = await res.json();
 				configs = data.configs || [];
 				activeConfigId = data.active_config_id || '';
-				
+
 				if (configs.length > 0) {
-					if (activeConfigId && configs.some(c => c.id === activeConfigId)) {
+					if (activeConfigId && configs.some((c) => c.id === activeConfigId)) {
 						selectedConfigId = activeConfigId;
 					} else {
 						selectedConfigId = configs[0].id;
@@ -98,13 +98,13 @@
 			return;
 		}
 		const idToDelete = selectedConfigId;
-		const index = configs.findIndex(c => c.id === idToDelete);
+		const index = configs.findIndex((c) => c.id === idToDelete);
 		configs = configs.filter((c) => c.id !== idToDelete);
-		
+
 		if (activeConfigId === idToDelete) {
 			activeConfigId = configs[0].id;
 		}
-		
+
 		if (configs.length > 0) {
 			const nextIndex = Math.max(0, index - 1);
 			selectedConfigId = configs[nextIndex].id;
@@ -139,7 +139,9 @@
 
 	function removeNode(id: string) {
 		if (selectedConfigIndex === -1) return;
-		configs[selectedConfigIndex].nodes = configs[selectedConfigIndex].nodes.filter((n) => n.id !== id);
+		configs[selectedConfigIndex].nodes = configs[selectedConfigIndex].nodes.filter(
+			(n) => n.id !== id
+		);
 	}
 
 	async function saveConfig() {
@@ -199,24 +201,37 @@
 			<div class="p-4 border rounded-xl bg-muted/20 space-y-4">
 				<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
 					<div class="flex-1 space-y-2">
-						<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Select Configuration</Label>
+						<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+							>Select Configuration</Label
+						>
 						<select
 							bind:value={selectedConfigId}
 							class="w-full bg-background border border-border/50 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
 						>
 							{#each configs as conf}
 								<option value={conf.id}>
-									{conf.name} {activeConfigId === conf.id ? '★ (Active)' : ''}
+									{conf.name}
+									{activeConfigId === conf.id ? '★ (Active)' : ''}
 								</option>
 							{/each}
 						</select>
 					</div>
 					<div class="flex items-center gap-2">
-						<Button variant="outline" size="sm" onclick={createNewConfig} disabled={configs.length >= 20}>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={createNewConfig}
+							disabled={configs.length >= 20}
+						>
 							<Plus class="w-3.5 h-3.5 mr-1" />
 							New Swarm
 						</Button>
-						<Button variant="destructive" size="sm" onclick={deleteConfig} disabled={configs.length <= 1}>
+						<Button
+							variant="destructive"
+							size="sm"
+							onclick={deleteConfig}
+							disabled={configs.length <= 1}
+						>
 							<Trash2 class="w-3.5 h-3.5 mr-1" />
 							Delete
 						</Button>
@@ -226,8 +241,13 @@
 				{#if selectedConfigIndex !== -1}
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
 						<div class="space-y-1.5">
-							<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Swarm Name</Label>
-							<Input bind:value={configs[selectedConfigIndex].name} placeholder="Swarm Name (e.g. Coding Swarm)" />
+							<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+								>Swarm Name</Label
+							>
+							<Input
+								bind:value={configs[selectedConfigIndex].name}
+								placeholder="Swarm Name (e.g. Coding Swarm)"
+							/>
 						</div>
 						<div class="flex items-end pb-1.5">
 							<label class="flex items-center gap-2 cursor-pointer select-none">
@@ -243,7 +263,9 @@
 									}}
 									class="accent-primary h-4 w-4 rounded border-border"
 								/>
-								<span class="text-xs font-semibold text-foreground">Set as active Swarm configuration</span>
+								<span class="text-xs font-semibold text-foreground"
+									>Set as active Swarm configuration</span
+								>
 							</label>
 						</div>
 					</div>
@@ -252,7 +274,7 @@
 
 			{#if selectedConfigIndex !== -1}
 				{@const currentNodes = configs[selectedConfigIndex].nodes}
-				
+
 				{#if currentNodes.length === 0}
 					<div class="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
 						No nodes configured. Add your first node below!
@@ -284,7 +306,9 @@
 
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 							<div class="space-y-2">
-								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Role</Label>
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+									>Role</Label
+								>
 								<select
 									bind:value={node.role}
 									class="flex-1 w-full bg-background border border-border/50 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary truncate font-medium text-foreground"
@@ -295,7 +319,9 @@
 							</div>
 
 							<div class="space-y-2">
-								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Source Type</Label>
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+									>Source Type</Label
+								>
 								<select
 									bind:value={node.sourceType}
 									class="flex-1 w-full bg-background border border-border/50 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary truncate font-medium text-foreground"
@@ -316,7 +342,9 @@
 
 						{#if node.sourceType === 'local'}
 							<div class="space-y-2">
-								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Select Model</Label>
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+									>Select Model</Label
+								>
 								<select
 									bind:value={node.modelName}
 									class="flex-1 w-full bg-background border border-border/50 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary truncate font-medium text-foreground"
@@ -331,11 +359,15 @@
 							</div>
 						{:else}
 							<div class="space-y-2">
-								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Model URL</Label>
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+									>Model URL</Label
+								>
 								<Input bind:value={node.url} placeholder="http://127.0.0.1:8080/v1" />
 							</div>
 							<div class="space-y-2">
-								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Model Name</Label>
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+									>Model Name</Label
+								>
 								<Input bind:value={node.modelName} placeholder="model-name" />
 							</div>
 						{/if}

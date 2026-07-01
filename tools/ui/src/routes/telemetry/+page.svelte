@@ -45,19 +45,13 @@
 			let totalPromptTokens = 0;
 			let totalPromptSeconds = 0;
 
-			const predictedMatch = [
-				...text.matchAll(/llamacpp:predicted_tokens_seconds\s+([\d.]+)/g)
-			];
+			const predictedMatch = [...text.matchAll(/llamacpp:predicted_tokens_seconds\s+([\d.]+)/g)];
 			const promptMatch = [...text.matchAll(/llamacpp:prompt_tokens_seconds\s+([\d.]+)/g)];
-			const tokensTotalMatch = [
-				...text.matchAll(/llamacpp:tokens_predicted_total\s+([\d.]+)/g)
-			];
+			const tokensTotalMatch = [...text.matchAll(/llamacpp:tokens_predicted_total\s+([\d.]+)/g)];
 			const secondsTotalMatch = [
 				...text.matchAll(/llamacpp:tokens_predicted_seconds_total\s+([\d.]+)/g)
 			];
-			const promptTokensTotalMatch = [
-				...text.matchAll(/llamacpp:prompt_tokens_total\s+([\d.]+)/g)
-			];
+			const promptTokensTotalMatch = [...text.matchAll(/llamacpp:prompt_tokens_total\s+([\d.]+)/g)];
 			const promptSecondsTotalMatch = [
 				...text.matchAll(/llamacpp:prompt_seconds_total\s+([\d.]+)/g)
 			];
@@ -95,12 +89,11 @@
 				);
 			}
 
-			const processingMatch = [
-				...text.matchAll(/llamacpp:requests_processing\s+([\d.]+)/g)
-			];
-			const totalRequestsProcessing = processingMatch.length > 0
-				? processingMatch.reduce((sum, match) => sum + parseFloat(match[1]), 0)
-				: 0;
+			const processingMatch = [...text.matchAll(/llamacpp:requests_processing\s+([\d.]+)/g)];
+			const totalRequestsProcessing =
+				processingMatch.length > 0
+					? processingMatch.reduce((sum, match) => sum + parseFloat(match[1]), 0)
+					: 0;
 
 			// Calculate deltas for idle periods
 			const deltaPredictedTokens = totalPredictedTokens - lastPredictedTokens;
@@ -124,8 +117,7 @@
 			}
 			promptSpeed = currentPromptSpeed;
 
-			avgTokenSpeed =
-				totalPredictedSeconds > 0 ? totalPredictedTokens / totalPredictedSeconds : 0;
+			avgTokenSpeed = totalPredictedSeconds > 0 ? totalPredictedTokens / totalPredictedSeconds : 0;
 
 			// Store current values for the next poll
 			lastPredictedTokens = totalPredictedTokens;
@@ -181,7 +173,6 @@
 </script>
 
 <div class="mx-auto w-full p-4 md:p-8 md:py-8" in:fade={{ duration: 150 }}>
-
 	<div class="grid gap-6">
 		<!-- Application Telemetry -->
 		<div class="rounded-xl border border-border/50 bg-card p-6 shadow-sm">

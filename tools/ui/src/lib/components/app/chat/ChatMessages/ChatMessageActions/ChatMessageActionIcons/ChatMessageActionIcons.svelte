@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Edit, Copy, RefreshCw, Trash2, ArrowRight, GitBranch } from '@lucide/svelte';
+	import { Edit, Copy, RefreshCw, Trash2, ArrowRight, GitBranch, ThumbsUp, ThumbsDown } from '@lucide/svelte';
 	import {
 		ActionIcon,
 		ChatMessageActionIconsBranchingControls,
@@ -36,6 +36,10 @@
 		showRawOutputSwitch?: boolean;
 		rawOutputEnabled?: boolean;
 		onRawOutputToggle?: (enabled: boolean) => void;
+		onThumbsUp?: () => void;
+		onThumbsDown?: () => void;
+		isThumbsUpActive?: boolean;
+		isThumbsDownActive?: boolean;
 	}
 
 	let {
@@ -56,7 +60,11 @@
 		showDeleteDialog,
 		showRawOutputSwitch = false,
 		rawOutputEnabled = false,
-		onRawOutputToggle
+		onRawOutputToggle,
+		onThumbsUp,
+		onThumbsDown,
+		isThumbsUpActive = false,
+		isThumbsDownActive = false
 	}: Props = $props();
 
 	let showForkDialog = $state(false);
@@ -95,6 +103,14 @@
 		<div
 			class="pointer-events-auto inset-0 flex items-center gap-1 opacity-100 transition-all duration-150"
 		>
+			{#if role === MessageRole.ASSISTANT && onThumbsUp}
+				<ActionIcon icon={ThumbsUp} tooltip="Good response" onclick={onThumbsUp} class={isThumbsUpActive ? 'text-green-500 hover:text-green-600' : ''} />
+			{/if}
+
+			{#if role === MessageRole.ASSISTANT && onThumbsDown}
+				<ActionIcon icon={ThumbsDown} tooltip="Bad response" onclick={onThumbsDown} class={isThumbsDownActive ? 'text-red-500 hover:text-red-600' : ''} />
+			{/if}
+
 			<ActionIcon icon={Copy} tooltip="Copy" onclick={onCopy} />
 
 			{#if onEdit}

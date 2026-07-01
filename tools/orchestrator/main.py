@@ -265,14 +265,7 @@ def start_local_mcp_servers():
             "port": 8023,
             "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8023", "--stdio", "npx -y @modelcontextprotocol/server-postgres postgresql://postgres:postgres@localhost:5432/postgres", "--cors"]
         },
-        {
-            "name": "Figma",
-            "port": 8013,
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8013", "--stdio", "npx -y figma-developer-mcp --stdio", "--cors"],
-            "env": {
-                "FIGMA_API_KEY": "dummy"
-            }
-        },
+
         {
             "name": "GitHub",
             "port": 8017,
@@ -445,6 +438,18 @@ async def startup_event():
 async def shutdown_event():
     stop_rpc_server()
     stop_local_mcp_servers()
+
+@app.post("/api/shutdown")
+async def shutdown_api():
+    logger.info("Received shutdown request via API.")
+    stop_rpc_server()
+    stop_local_mcp_servers()
+    # Schedule process exit to allow the HTTP response to be sent
+    def exit_process():
+        time.sleep(0.5)
+        os._exit(0)
+    threading.Thread(target=exit_process, daemon=True).start()
+    return {"status": "shutting down"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -820,15 +825,75 @@ async def proxy_management(request: Request):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+def find_server_log_file():
+    # 1. Try to find the running llama-server.exe CWD via psutil
+    try:
+        import psutil
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'] and 'llama-server' in proc.info['name'].lower():
+                    # Try CWD first
+                    cwd = proc.cwd()
+                    if cwd:
+                        log_path = os.path.join(cwd, "server.log")
+                        if os.path.exists(log_path):
+                            return log_path
+                    # Try EXE directory next
+                    exe_path = proc.exe()
+                    if exe_path:
+                        exe_dir = os.path.dirname(exe_path)
+                        log_path = os.path.join(exe_dir, "server.log")
+                        if os.path.exists(log_path):
+                            return log_path
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        logger.debug(f"psutil check failed: {e}")
+
+    # 2. Check sibling build/bin paths relative to orchestrator script
+    try:
+        script_dir = os.path.dirname(__file__)
+        # check tools/orchestrator/../../build/bin/server.log
+        dev_log_path = os.path.abspath(os.path.join(script_dir, "..", "..", "build", "bin", "server.log"))
+        if os.path.exists(dev_log_path):
+            return dev_log_path
+        # check tools/orchestrator/../../build/bin/Release/server.log
+        release_log_path = os.path.abspath(os.path.join(script_dir, "..", "..", "build", "bin", "Release", "server.log"))
+        if os.path.exists(release_log_path):
+            return release_log_path
+    except Exception as e:
+        pass
+
+    # 3. Check current directory
+    if os.path.exists("server.log"):
+        return os.path.abspath("server.log")
+
+    return None
+
 @app.get("/api/logs/stream")
 async def stream_logs():
     async def log_generator():
-        log_file = "server.log"
+        log_file = None
+        for _ in range(10):
+            log_file = find_server_log_file()
+            if log_file and os.path.exists(log_file):
+                break
+            await asyncio.sleep(1)
+            
+        if not log_file:
+            # Fallback to CWD default path
+            log_file = os.path.abspath("server.log")
+            
         if not os.path.exists(log_file):
             yield "data: Waiting for server.log to be created...\n\n"
             while not os.path.exists(log_file):
+                resolved = find_server_log_file()
+                if resolved and os.path.exists(resolved):
+                    log_file = resolved
+                    break
                 await asyncio.sleep(1)
         
+        logger.info(f"Streaming logs from: {log_file}")
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             # Tail last 50 lines initially
             f.seek(0, 2)

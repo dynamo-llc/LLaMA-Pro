@@ -26,12 +26,6 @@
 			description: 'Fetch the latest news articles (no API key required)'
 		},
 		{
-			name: 'Brave Search',
-			url: 'http://localhost:8002/sse',
-			description: 'Web search engine integration (requires X-Brave-Key header)',
-			headers: '{\n  "X-Brave-Key": "YOUR_API_KEY_HERE"\n}'
-		},
-		{
 			name: 'SQLite Database',
 			url: 'http://localhost:8030/sse',
 			description: 'Read and write local SQL databases'
@@ -63,50 +57,15 @@
 			description: 'Decompile, read memory, and rename variables inside IDA Pro'
 		},
 		{
-			name: 'Firecrawl',
-			url: 'http://localhost:8011/sse',
-			description: 'Scrapes and transforms any website into clean, LLM-ready data',
-			headers: '{\n  "Authorization": "Bearer YOUR_FIRECRAWL_API_KEY"\n}'
-		},
-		{
-			name: 'Supabase',
-			url: 'http://localhost:8012/sse',
-			description: 'Natively write SQL, manage database schemas, and query data'
-		},
-		{
-			name: 'Figma',
-			url: 'http://localhost:8013/sse',
-			description: 'Exposes live structure, auto-layout, and components of Figma files',
-			headers: '{\n  "Figma-Token": "YOUR_FIGMA_PERSONAL_ACCESS_TOKEN"\n}'
-		},
-		{
-			name: 'Composio',
-			url: 'http://localhost:8014/sse',
-			description: 'Access over 250 tools and integrations (Jira, GitHub, Slack, etc.)',
-			headers: '{\n  "x-api-key": "YOUR_COMPOSIO_API_KEY"\n}'
-		},
-		{
 			name: 'Playwright',
 			url: 'http://localhost:8015/sse',
 			description: 'Programmatic browser automation and end-to-end testing'
-		},
-		{
-			name: 'E2B Sandbox',
-			url: 'http://localhost:8016/sse',
-			description: 'Secure, isolated cloud sandbox environment to execute and test code',
-			headers: '{\n  "Authorization": "Bearer YOUR_E2B_API_KEY"\n}'
 		},
 		{
 			name: 'GitHub',
 			url: 'http://localhost:8017/sse',
 			description: 'Read repositories, create issues, submit PRs, and manage version control',
 			headers: '{\n  "Authorization": "token YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"\n}'
-		},
-		{
-			name: 'Notion',
-			url: 'http://localhost:8018/sse',
-			description: 'Access workspace data, team documentation, and task boards',
-			headers: '{\n  "Authorization": "Bearer YOUR_NOTION_INTEGRATION_TOKEN",\n  "Notion-Version": "2022-06-28"\n}'
 		},
 		{
 			name: 'Chrome DevTools (Browsertools)',
@@ -116,12 +75,8 @@
 		{
 			name: 'Memory',
 			url: 'http://localhost:8021/sse',
-			description: 'Local semantic memory graph database that persists facts and entities across sessions'
-		},
-		{
-			name: 'Docker',
-			url: 'http://localhost:8022/sse',
-			description: 'Inspect, manage, build, and run local Docker containers and view logs'
+			description:
+				'Local semantic memory graph database that persists facts and entities across sessions'
 		},
 		{
 			name: 'PostgreSQL',
@@ -131,12 +86,8 @@
 		{
 			name: 'Jupyter Notebook',
 			url: 'http://localhost:8024/sse',
-			description: 'Stateful Jupyter Python kernel for calculations, data analysis, and chart generation'
-		},
-		{
-			name: 'Google Sheets',
-			url: 'http://localhost:8025/sse',
-			description: 'Access and edit Google Sheets spreadsheets'
+			description:
+				'Stateful Jupyter Python kernel for calculations, data analysis, and chart generation'
 		}
 	];
 

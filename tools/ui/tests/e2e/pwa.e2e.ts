@@ -84,8 +84,8 @@ test.describe('PWA Service Worker', () => {
 		expect(response.ok()).toBeTruthy();
 
 		const manifest = await response.json();
-		expect(manifest).toHaveProperty('name', 'llama-ui');
-		expect(manifest).toHaveProperty('short_name', 'llama-ui');
+		expect(manifest).toHaveProperty('name', 'LLaMA Pro');
+		expect(manifest).toHaveProperty('short_name', 'LLaMA Pro');
 		expect(manifest).toHaveProperty('start_url', './');
 		expect(manifest).toHaveProperty('display', 'standalone');
 		expect(manifest.icons).toBeTruthy();
