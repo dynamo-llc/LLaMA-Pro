@@ -28,7 +28,7 @@ from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from ui.graph import create_ui_graph
 
-from tunnel import TunnelManager
+from tunnel import TunnelManager, get_local_ip
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 
 # FastAPI App
 app = FastAPI()
+
+@app.get("/api/tunnel/local")
+def get_local_network_ip():
+    ip = get_local_ip()
+    # The frontend knows the port (usually 8000), but we can just return the IP
+    return {"ip": ip}
 
 def get_base_paths():
 	if getattr(sys, 'frozen', False):

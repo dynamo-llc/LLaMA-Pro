@@ -6,8 +6,20 @@ import re
 import logging
 import time
 import platform
+import atexit
+import socket
 
 logger = logging.getLogger(__name__)
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
 
 class TunnelManager:
     def __init__(self, base_dir):
@@ -18,6 +30,7 @@ class TunnelManager:
         self.process = None
         self.public_url = None
         self.lock = threading.Lock()
+        atexit.register(self.stop)
         
     def ensure_binary(self):
         if not os.path.exists(self.bin_dir):
