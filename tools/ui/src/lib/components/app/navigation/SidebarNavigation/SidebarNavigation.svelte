@@ -128,10 +128,10 @@
 			if (!host || host === '-') {
 				host = '127.0.0.1';
 			}
-			let port = window.location.port || '8080';
+			let port = window.llamaPort || window.location.port || '8080';
 			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:${port}`;
 		}
-		return 'http://localhost:8080';
+		return `http://localhost:${window.llamaPort || '8080'}`;
 	});
 
 	const orchestratorHost = $derived.by(() => {
@@ -140,9 +140,10 @@
 			if (!host || host === '-') {
 				host = '127.0.0.1';
 			}
-			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:8000`;
+			let port = window.orchestratorPort || '8000';
+			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:${port}`;
 		}
-		return 'http://localhost:8000';
+		return `http://localhost:${window.orchestratorPort || '8000'}`;
 	});
 
 	const loadedSlots = $derived.by(() => {
@@ -574,7 +575,7 @@
 						<span
 							aria-hidden="true"
 							class="pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-background shadow ring-0 transition duration-200 ease-in-out {isContributingCompute ? 'translate-x-3.5' : 'translate-x-0'}"
-						/>
+						></span>
 					</button>
 				</div>
 
@@ -596,7 +597,7 @@
 						<span
 							aria-hidden="true"
 							class="pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-background shadow ring-0 transition duration-200 ease-in-out {isUsingMeshInference ? 'translate-x-3.5' : 'translate-x-0'}"
-						/>
+						></span>
 					</button>
 				</div>
 			</div>

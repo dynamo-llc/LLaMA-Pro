@@ -9,7 +9,8 @@
     "build": "electron-builder --win --dir"
   },
   "dependencies": {
-    "electron-serve": "^1.3.0"
+    "electron-serve": "^1.3.0",
+    "electron-updater": "^6.1.8"
   },
   "devDependencies": {
     "electron": "^30.0.0",
@@ -18,15 +19,23 @@
   "build": {
     "appId": "com.llama.pro",
     "productName": "LLaMA Pro",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dynamo-llc",
+        "repo": "LLaMA-Pro"
+      }
+    ],
     "win": {
-      "target": "dir"
+      "target": "nsis"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "LLaMA Pro"
+      "shortcutName": "LLaMA Pro",
+      "include": "installer.nsh"
     },
     "files": [
       "main.js",

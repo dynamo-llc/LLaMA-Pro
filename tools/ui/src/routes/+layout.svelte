@@ -37,7 +37,7 @@
 
 	if (browser && window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
 		const originalFetch = window.fetch;
-		window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+		window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
 			let urlStr = '';
 			if (typeof input === 'string') {
 				urlStr = input;
@@ -61,13 +61,27 @@
 				else if (pathname.endsWith('/slots')) pathname = '/slots';
 				else if (pathname.endsWith('/health')) pathname = '/health';
 
-				let targetOrigin = 'http://127.0.0.1:8080';
+				let llamaPort = window.llamaPort || '8080';
+				let orchestratorPort = window.orchestratorPort || '8000';
+				if (!window.llamaPort && window.electronAPI && window.electronAPI.getPorts) {
+					try {
+						const ports = await window.electronAPI.getPorts();
+						llamaPort = ports.llamaPort;
+						orchestratorPort = ports.orchestratorPort;
+						window.llamaPort = llamaPort;
+						window.orchestratorPort = orchestratorPort;
+					} catch (e) {
+						console.error('Failed to get dynamic ports via IPC:', e);
+					}
+				}
+
+				let targetOrigin = `http://127.0.0.1:${llamaPort}`;
 				if (
 					pathname.startsWith('/api') ||
 					pathname.startsWith('/telemetry') ||
 					pathname.startsWith('/metrics')
 				) {
-					targetOrigin = 'http://127.0.0.1:8000';
+					targetOrigin = `http://127.0.0.1:${orchestratorPort}`;
 				}
 
 				const newUrl = targetOrigin + pathname + resolvedUrl.search;
@@ -205,6 +219,34 @@
 
 	onMount(() => {
 		updateFavicon();
+		
+		if (window.electronAPI) {
+			if (window.electronAPI.onUpdateReady) {
+				window.electronAPI.onUpdateReady(() => {
+					import('svelte-sonner').then(({ toast }) => {
+						toast.success('Update downloaded', {
+							description: 'A new version of LLaMA Pro is ready to install.',
+							duration: 100000,
+							action: {
+								label: 'Restart & Install',
+								onClick: () => window.electronAPI.quitAndInstall()
+							}
+						});
+					});
+				});
+			}
+			if (window.electronAPI.onUpdateError) {
+				window.electronAPI.onUpdateError((error) => {
+					import('svelte-sonner').then(({ toast }) => {
+						toast.error('Update failed', {
+							description: 'Could not download the latest update. Check your connection.',
+							duration: 5000
+						});
+						console.error('Auto-updater error:', error);
+					});
+				});
+			}
+		}
 	});
 
 	$effect(() => {

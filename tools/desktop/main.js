@@ -1,7 +1,10 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
+const { spawn, fork, exec } = require('child_process');
 const path = require('path');
-const { spawn, fork } = require('child_process');
+const fs = require('fs');
 const serve = require('electron-serve');
+const net = require('net');
+const { autoUpdater } = require('electron-updater');
 
 const loadURL = serve({ directory: path.join(__dirname, 'ui-dist') });
 
@@ -12,8 +15,34 @@ let latticaProcess = null;
 let echoProcess = null;
 let rpcServerProcess = null;
 
+function getFreePort(startPort) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(startPort, () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
+    });
+    server.on('error', () => resolve(getFreePort(startPort + 1)));
+  });
+}
+
+function streamLogs(proc, name) {
+  const sendLog = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('backend-log', { source: name, data: data.toString() });
+    }
+  };
+  proc.stdout.on('data', (data) => {
+    console.log(`[${name}] ${data}`);
+    sendLog(data);
+  });
+  proc.stderr.on('data', (data) => {
+    console.error(`[${name}] ${data}`);
+    sendLog(data);
+  });
+}
+
 async function startBackendProcesses() {
-  const fs = require('fs');
   const isPackaged = app.isPackaged;
   
   let serverPath;
@@ -119,6 +148,9 @@ async function startBackendProcesses() {
   let globalServerPath = serverPath;
   let globalServerCwd = serverCwd;
 
+  global.llamaPort = await getFreePort(8080);
+  global.orchestratorPort = await getFreePort(8000);
+
   // We attach this to global so the IPC handler can use it later
   global.startLlamaServer = async function(useMesh = false) {
     if (serverProcess) {
@@ -146,13 +178,15 @@ async function startBackendProcesses() {
       }
     }
 
-    const serverArgs = ['--port', '8080', '--host', '127.0.0.1', ...rpcArgs];
+    const serverArgs = ['--port', global.llamaPort.toString(), '--host', '127.0.0.1', ...rpcArgs];
     console.log(`Starting C++ backend from: ${globalServerPath} with args:`, serverArgs);
     serverProcess = spawn(globalServerPath, serverArgs, {
       cwd: globalServerCwd,
-      stdio: 'ignore'
+      stdio: ['ignore', 'pipe', 'pipe']
     });
     
+    streamLogs(serverProcess, 'llama-server');
+
     serverProcess.on('error', (err) => {
       console.error('Failed to start llama-server process:', err);
     });
@@ -162,11 +196,16 @@ async function startBackendProcesses() {
   await global.startLlamaServer(false); // Default to local only at startup
   
   console.log(`Starting Python orchestrator from: ${orchestratorPath}`);
+  
+  // Try to pass port if orchestrator supports it, or use environment variables if we wanted, but since it's hardcoded to 8000 in python, we would need to pass it
+  orchestratorArgs.push('--port', global.orchestratorPort.toString());
   orchestratorProcess = spawn(orchestratorPath, orchestratorArgs, {
     cwd: orchestratorCwd,
-    stdio: 'ignore'
+    stdio: ['ignore', 'pipe', 'pipe']
   });
   
+  streamLogs(orchestratorProcess, 'orchestrator');
+
   orchestratorProcess.on('error', (err) => {
     console.error('Failed to start orchestrator process:', err);
   });
@@ -259,24 +298,58 @@ ipcMain.handle('stop-rpc-server', () => {
   return { success: true };
 });
 
-ipcMain.handle('restart-backend', async (event, options) => {
-  if (global.startLlamaServer) {
-    await global.startLlamaServer(options?.useMesh || false);
-    return { success: true };
+ipcMain.handle('restart-backend', async (_event, options) => {
+  const useMesh = options && options.useMesh;
+  return await global.startLlamaServer(useMesh);
+});
+
+ipcMain.handle('get-ports', () => {
+  return { llamaPort: global.llamaPort, orchestratorPort: global.orchestratorPort };
+});
+
+ipcMain.handle('export-logs', async (event, logText) => {
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Logs',
+    defaultPath: 'llama-pro-logs.txt',
+    filters: [{ name: 'Text Files', extensions: ['txt'] }]
+  });
+  if (!canceled && filePath) {
+    const fs = require('fs');
+    fs.writeFileSync(filePath, logText);
+    return true;
   }
-  return { success: false, error: 'startLlamaServer not found' };
+  return false;
+});
+
+ipcMain.handle('quit-and-install', () => {
+  autoUpdater.quitAndInstall();
+});
+
+autoUpdater.on('update-downloaded', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update-ready');
+  }
+});
+
+autoUpdater.on('error', (error) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update-error', error == null ? "unknown" : (error.stack || error).toString());
+  }
 });
 
 app.whenReady().then(() => {
-  startBackendProcesses();
-  createWindow();
+  autoUpdater.checkForUpdatesAndNotify();
+  startBackendProcesses().then(() => {
+    createWindow();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       if (!serverProcess || !orchestratorProcess) {
-        startBackendProcesses();
+        startBackendProcesses().then(() => createWindow());
+      } else {
+        createWindow();
       }
-      createWindow();
     }
   });
 });

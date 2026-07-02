@@ -56,13 +56,28 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
 			: `${base}${path}`;
 
 	let response;
-	try {
-		response = await fetch(url, {
-			...fetchOptions,
-			headers
-		});
-	} catch (e) {
-		throw new Error(beautifyNetworkError(e));
+	let retries = 3;
+	let backoff = 1000;
+	
+	while (retries >= 0) {
+		try {
+			response = await fetch(url, {
+				...fetchOptions,
+				headers
+			});
+			break; // Success, exit retry loop
+		} catch (e) {
+			if (retries === 0) {
+				throw new Error(beautifyNetworkError(e));
+			}
+			retries--;
+			await new Promise((resolve) => setTimeout(resolve, backoff));
+			backoff *= 2; // Exponential backoff
+		}
+	}
+	
+	if (!response) {
+		throw new Error(ERROR_MESSAGES.NETWORK.UNREACHABLE);
 	}
 
 	if (!response.ok) {
@@ -108,13 +123,28 @@ export async function apiFetchWithParams<T>(
 	const headers = { ...baseHeaders, ...customHeaders };
 
 	let response;
-	try {
-		response = await fetch(url.toString(), {
-			...fetchOptions,
-			headers
-		});
-	} catch (e) {
-		throw new Error(beautifyNetworkError(e));
+	let retries = 3;
+	let backoff = 1000;
+	
+	while (retries >= 0) {
+		try {
+			response = await fetch(url.toString(), {
+				...fetchOptions,
+				headers
+			});
+			break;
+		} catch (e) {
+			if (retries === 0) {
+				throw new Error(beautifyNetworkError(e));
+			}
+			retries--;
+			await new Promise((resolve) => setTimeout(resolve, backoff));
+			backoff *= 2;
+		}
+	}
+	
+	if (!response) {
+		throw new Error(ERROR_MESSAGES.NETWORK.UNREACHABLE);
 	}
 
 	if (!response.ok) {

@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { base } from '$app/paths';
-	import { Terminal as TerminalIcon } from '@lucide/svelte';
+	import { Terminal as TerminalIcon, Copy, Trash2, Save } from '@lucide/svelte';
 
-	let logs: string[] = $state([]);
+	let logs: {source: string, text: string}[] = $state([]);
 	let terminalContainer: HTMLDivElement | null = null;
 	let terminalWrapper: HTMLDivElement | null = null;
-	let eventSource: EventSource | null = null;
 	let autoScroll = $state(true);
 	let availableHeight = $state(0);
 
@@ -24,50 +23,28 @@
 			resizeObserver.observe(scrollParent);
 		}
 
-		// Initialize SSE connection to the backend logs stream
-		let host = window.location.hostname;
-		if (
-			!host ||
-			host === '-' ||
-			(window.location.protocol !== 'http:' && window.location.protocol !== 'https:')
-		) {
-			host = '127.0.0.1';
-		}
-		let port = window.location.port || '8080';
-		eventSource = new EventSource(`http://${host}:${port}/api/logs/stream`);
-
-		eventSource.onmessage = (event) => {
-			logs = [...logs, event.data];
-			if (logs.length > 2000) {
-				// Keep a healthy buffer but allow massive scrollback
-				logs = logs.slice(logs.length - 2000);
-			}
-
-			if (autoScroll && terminalContainer) {
-				setTimeout(() => {
-					if (terminalContainer) {
-						terminalContainer.scrollTop = terminalContainer.scrollHeight;
-					}
-				}, 10);
-			}
-		};
-
-		eventSource.onerror = (error) => {
-			console.error('SSE connection error:', error);
-			eventSource?.close();
-			// Attempt to reconnect after 5 seconds
-			setTimeout(() => {
-				if (document.visibilityState === 'visible') {
-					eventSource = new EventSource(`http://${host}:${port}/api/logs/stream`);
+		if (window.electronAPI && window.electronAPI.onBackendLog) {
+			window.electronAPI.onBackendLog((logEntry) => {
+				logs = [...logs, { source: logEntry.source, text: logEntry.data }];
+				if (logs.length > 2000) {
+					// Keep a healthy buffer but allow massive scrollback
+					logs = logs.slice(logs.length - 2000);
 				}
-			}, 5000);
-		};
+
+				if (autoScroll && terminalContainer) {
+					setTimeout(() => {
+						if (terminalContainer) {
+							terminalContainer.scrollTop = terminalContainer.scrollHeight;
+						}
+					}, 10);
+				}
+			});
+		} else {
+			logs = [{ source: 'system', text: 'Backend logs stream is only available in the Electron desktop app.' }];
+		}
 	});
 
 	onDestroy(() => {
-		if (eventSource) {
-			eventSource.close();
-		}
 		if (resizeObserver) {
 			resizeObserver.disconnect();
 		}
@@ -79,6 +56,24 @@
 			// If we are within 20px of the bottom, enable autoscroll
 			autoScroll = Math.abs(scrollHeight - clientHeight - scrollTop) < 20;
 		}
+	}
+
+	function copyLogs() {
+		const text = logs.map((l) => `[${l.source}] ${l.text}`).join('\n');
+		navigator.clipboard.writeText(text);
+	}
+
+	async function exportLogs() {
+		if (window.electronAPI && window.electronAPI.exportLogs) {
+			const text = logs.map((l) => `[${l.source}] ${l.text}`).join('\n');
+			await window.electronAPI.exportLogs(text);
+		} else {
+			alert('Exporting logs is only available in the desktop app.');
+		}
+	}
+
+	function clearLogs() {
+		logs = [];
 	}
 </script>
 
@@ -95,16 +90,25 @@
 		<div
 			class="h-10 bg-[#d1d5db] border-b border-[#9ca3af] flex items-center px-4 justify-between select-none shrink-0"
 		>
-			<div class="flex gap-2">
+			<div class="flex gap-2 w-24">
 				<div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
 				<div class="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
 				<div class="w-3 h-3 rounded-full bg-[#27c93f]"></div>
 			</div>
-			<div class="text-[10px] font-mono text-[#4b5563] uppercase tracking-widest">
-				llama-server &mdash; bash
+			<div class="text-[10px] font-mono text-[#4b5563] uppercase tracking-widest flex-1 text-center font-bold">
+				Developer Console
 			</div>
-			<div class="w-16"></div>
-			<!-- Spacer for centering -->
+			<div class="flex gap-2 w-24 justify-end">
+				<button onclick={exportLogs} class="text-[#4b5563] hover:text-[#2563eb] transition-colors" title="Export Logs">
+					<Save size={14} />
+				</button>
+				<button onclick={copyLogs} class="text-[#4b5563] hover:text-[#1f2937] transition-colors" title="Copy Logs">
+					<Copy size={14} />
+				</button>
+				<button onclick={clearLogs} class="text-[#4b5563] hover:text-[#ef4444] transition-colors" title="Clear Logs">
+					<Trash2 size={14} />
+				</button>
+			</div>
 		</div>
 
 		<!-- Log Content -->
@@ -119,7 +123,12 @@
 				</div>
 			{:else}
 				{#each logs as log}
-					<div>{log}</div>
+					<div class="flex gap-2 hover:bg-black/5 rounded-sm px-1 -mx-1">
+						<span class="w-28 shrink-0 text-right opacity-80" class:text-blue-600={log.source === 'llama-server'} class:text-yellow-600={log.source === 'orchestrator'}>
+							[{log.source}]
+						</span>
+						<span class="break-all">{log.text}</span>
+					</div>
 				{/each}
 			{/if}
 		</div>

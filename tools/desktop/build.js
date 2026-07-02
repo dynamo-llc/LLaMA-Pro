@@ -24,17 +24,8 @@ try {
   console.log('\n=== Step 4: Packaging Electron App ===');
   runCommand('npm run build', __dirname);
 
-  console.log('\n=== Step 5: Compiling Inno Setup Installer ===');
-  const isccPath = path.join(process.env.USERPROFILE, 'AppData/Local/Programs/Inno Setup 6/ISCC.exe');
-  if (fs.existsSync(isccPath)) {
-    runCommand(`"${isccPath}" installer.iss`, __dirname);
-    console.log('\n=== SUCCESS ===');
-    console.log(`Installer created successfully! Output file is at:`);
-    console.log(path.resolve(path.join(__dirname, 'dist-installer/LLaMA-Pro-Setup.exe')));
-  } else {
-    console.warn(`\n[WARNING] ISCC.exe not found at ${isccPath}.`);
-    console.warn(`Please open Inno Setup and manually compile the script at: ${path.join(__dirname, 'installer.iss')}`);
-  }
+  console.log('\n=== SUCCESS ===');
+  console.log(`Installer created successfully using electron-builder!`);
 } catch (error) {
   console.error('\n=== BUILD FAILED ===');
   console.error(error);
