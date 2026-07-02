@@ -23,7 +23,8 @@
 		Settings2,
 		Server,
 		Network,
-		Cpu
+		Cpu,
+		Search
 	} from '@lucide/svelte';
 
 	import SwarmDialog from '$lib/components/app/SwarmDialog.svelte';
@@ -1886,6 +1887,18 @@
 					</div>
 
 					<div class="flex flex-wrap items-center gap-2 self-start md:self-center">
+						<!-- Inline Search -->
+						<div class="relative flex items-center">
+							<Search class="absolute left-2.5 h-3.5 w-3.5 text-muted-foreground" />
+							<Input
+								type="text"
+								bind:value={searchQuery}
+								oninput={handleSearchInput}
+								placeholder="Search models..."
+								class="h-8 w-40 sm:w-56 pl-8 pr-3 text-xs bg-background border-border/50 rounded-lg focus-visible:ring-1 transition-all"
+							/>
+						</div>
+
 						<!-- Filter button -->
 						<Button
 							variant="outline"
@@ -1996,17 +2009,7 @@
 							/>
 						</div>
 
-						<!-- Search -->
-						<div>
-							<Label class="text-xs font-semibold mb-1 block">Search Query</Label>
-							<Input
-								type="text"
-								bind:value={searchQuery}
-								oninput={handleSearchInput}
-								placeholder="Search repo name..."
-								class="bg-background border-border/50 rounded-lg px-3 py-1.5 text-sm h-auto focus-visible:ring-1"
-							/>
-						</div>
+						<!-- Deleted Search -->
 					</div>
 				{/if}
 
