@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+from fastapi.staticfiles import StaticFiles
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
@@ -1373,6 +1374,13 @@ async def get_graph():
     except Exception as e:
         logger.error(f"Error generating graph: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+ui_dist_path = os.path.abspath(os.path.join(BASE_DIR, "tools", "ui", "dist"))
+if os.path.exists(ui_dist_path):
+    logger.info(f"Mounting static UI from {ui_dist_path}")
+    app.mount("/", StaticFiles(directory=ui_dist_path, html=True), name="ui")
+else:
+    logger.warning(f"Static UI directory not found at {ui_dist_path}. Network web access will be unavailable.")
 
 if __name__ == "__main__":
     logger.info("Starting Orchestrator on port 8000")
