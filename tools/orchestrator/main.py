@@ -26,6 +26,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
+from ui.graph import create_ui_graph
+
+from tunnel import TunnelManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +55,7 @@ def get_base_paths():
 	return base_dir, providers_file, swarm_config_file, rpc_path
 
 BASE_DIR, PROVIDERS_FILE, SWARM_CONFIG_FILE, RPC_PATH = get_base_paths()
+tunnel_manager = TunnelManager(BASE_DIR)
 
 def load_providers():
     if os.path.exists(PROVIDERS_FILE):
@@ -1373,6 +1377,26 @@ async def get_graph():
         return {"mermaid": mermaid_string}
     except Exception as e:
         logger.error(f"Error generating graph: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/tunnel/start")
+async def start_tunnel():
+    try:
+        url = tunnel_manager.start(local_port=8000)
+        if url:
+            return {"url": url}
+        return JSONResponse({"error": "Failed to get tunnel URL"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Error starting tunnel: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/tunnel/stop")
+async def stop_tunnel():
+    try:
+        tunnel_manager.stop()
+        return {"status": "stopped"}
+    except Exception as e:
+        logger.error(f"Error stopping tunnel: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 ui_dist_path = os.path.abspath(os.path.join(BASE_DIR, "tools", "ui", "dist"))

@@ -77,3 +77,4 @@ export { default as SettingsChatToolsTab } from './SettingsChat/SettingsChatTool
 
 export { default as SettingsChatEchoTab } from './SettingsChat/SettingsChatEchoTab.svelte';
 export { default as SettingsLatticaTab } from './SettingsChat/SettingsLatticaTab.svelte';
+export { default as SettingsTunnelTab } from './SettingsChat/SettingsTunnelTab.svelte';

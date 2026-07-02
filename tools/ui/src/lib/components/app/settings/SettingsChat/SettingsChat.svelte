@@ -7,6 +7,7 @@
 		SettingsChatToolsTab,
 		SettingsChatEchoTab,
 		SettingsLatticaTab,
+		SettingsTunnelTab,
 		SettingsFooter
 	} from '$lib/components/app/settings';
 	import { config, settingsStore } from '$lib/stores/settings.svelte';
@@ -156,6 +157,8 @@
 						<SettingsChatEchoTab />
 					{:else if currentSection.title === SETTINGS_SECTION_TITLES.MESH}
 						<SettingsLatticaTab />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.TUNNEL}
+						<SettingsTunnelTab />
 					{:else if currentSection.fields}
 						<div class="space-y-6">
 							<SettingsChatFields

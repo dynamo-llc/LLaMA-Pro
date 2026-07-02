@@ -12,7 +12,8 @@ export const SETTINGS_SECTION_SLUGS = {
 	TOOLS: 'tools',
 	IMPORT_EXPORT: 'import-export',
 	ECHO: 'echo',
-	MESH: 'mesh'
+	MESH: 'mesh',
+	TUNNEL: 'tunnel'
 } as const;
 
 export const ROUTES = {

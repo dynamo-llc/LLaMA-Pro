@@ -16,7 +16,8 @@ import {
 	Target,
 	Globe,
 	Terminal,
-	Palette
+	Palette,
+	Smartphone
 } from '@lucide/svelte';
 import type { Component } from 'svelte';
 import type {
@@ -63,6 +64,11 @@ const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Co
 		title: SETTINGS_SECTION_TITLES.MESH,
 		slug: SETTINGS_SECTION_SLUGS.MESH,
 		icon: Globe
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.TUNNEL,
+		slug: SETTINGS_SECTION_SLUGS.TUNNEL,
+		icon: Smartphone
 	}
 ];
 
