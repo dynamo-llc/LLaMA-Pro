@@ -195,13 +195,17 @@ function stopBackendProcesses() {
     fetch('http://127.0.0.1:8000/api/shutdown', { method: 'POST' })
       .catch((err) => console.log('Orchestrator shutdown request failed:', err));
     
-    // Fallback kill
-    setTimeout(() => {
-      if (orchestratorProcess) {
-        orchestratorProcess.kill();
-        orchestratorProcess = null;
+    // Forcefully kill the entire process tree synchronously to avoid orphans
+    try {
+      if (process.platform === 'win32') {
+        require('child_process').execSync(`taskkill /pid ${orchestratorProcess.pid} /t /f`);
+      } else {
+        process.kill(-orchestratorProcess.pid); // kill process group
       }
-    }, 1000);
+    } catch (e) {
+      console.log('Failed to kill orchestrator tree:', e);
+    }
+    orchestratorProcess = null;
   }
 }
 

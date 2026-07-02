@@ -330,6 +330,18 @@ int llama_server(int argc, char ** argv) {
 
         routes.post_orchestra_chat_completions = [proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); };
         routes.post_swarm_chat_completions     = [proxy_to_orchestrator](const server_http_req & req) { return proxy_to_orchestrator("POST", req); };
+    } else {
+        auto not_supported = [](const server_http_req &) -> server_http_res_ptr {
+            throw std::invalid_argument("Dynamic model loading is not supported when running as a single-model worker node. Restart the engine without a model to enable router mode.");
+        };
+        ctx_http.post("/models",               ex_wrapper(not_supported));
+        ctx_http.post("/models/load",          ex_wrapper(not_supported));
+        ctx_http.post("/models/unload",        ex_wrapper(not_supported));
+        ctx_http.get ("/models/sse",           ex_wrapper(not_supported));
+        ctx_http.del ("/models",               ex_wrapper(not_supported));
+        ctx_http.get ("/models/cache-dir",     ex_wrapper(not_supported));
+        ctx_http.post("/models/cache-dir",     ex_wrapper(not_supported));
+        ctx_http.post("/models/update-ide",    ex_wrapper(not_supported));
     }
     ctx_http.get ("/api/logs/stream",          ex_wrapper([](const server_http_req & req) -> server_http_res_ptr {
         auto res = std::make_unique<server_http_res>();

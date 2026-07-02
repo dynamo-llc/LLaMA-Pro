@@ -152,14 +152,20 @@ export async function apiPost<T, B = unknown>(
 async function parseErrorMessage(response: Response): Promise<string> {
 	try {
 		const errorData = await response.json();
+		let message = '';
 		if (errorData?.error?.message) {
-			return errorData.error.message;
+			message = errorData.error.message;
+		} else if (errorData?.error && typeof errorData.error === 'string') {
+			message = errorData.error;
+		} else if (errorData?.message) {
+			message = errorData.message;
 		}
-		if (errorData?.error && typeof errorData.error === 'string') {
-			return errorData.error;
-		}
-		if (errorData?.message) {
-			return errorData.message;
+
+		if (message) {
+			if (response.status === 404 && message === 'File Not Found' && response.url.includes('/models')) {
+				return 'Dynamic model loading is not supported when running as a single-model worker node. Restart the engine without a local model to enable router mode.';
+			}
+			return message;
 		}
 	} catch {
 		// JSON parsing failed, use status text

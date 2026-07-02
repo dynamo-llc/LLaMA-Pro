@@ -167,7 +167,7 @@ bool server_http_context::init(const common_params & params) {
     });
 
     srv->set_error_handler([](const httplib::Request &, httplib::Response & res) {
-        if (res.status == 404) {
+        if (res.status == 404 && res.body.empty()) {
             res.set_content(
                 safe_json_to_str(json {
                     {"error", {

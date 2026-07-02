@@ -1,6 +1,6 @@
 [Setup]
 AppName=LLaMA Pro
-AppVersion=2.0.1
+AppVersion=2.0.4
 DefaultDirName={localappdata}\LLaMA Pro
 DefaultGroupName=LLaMA Pro
 OutputDir=dist-installer
@@ -38,4 +38,49 @@ Name: "{group}\LLaMA Pro"; Filename: "{app}\LLaMA Pro.exe"
 Name: "{autodesktop}\LLaMA Pro"; Filename: "{app}\LLaMA Pro.exe"; IconFilename: "{app}\LLaMA Pro.exe"; Tasks: desktopicon
 
 [Run]
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Check: VCRedistNeedsInstall; StatusMsg: "Installing Visual C++ Redistributable..."; Flags: waituntilterminated skipifdoesntexist
 Filename: "{app}\LLaMA Pro.exe"; Description: "Launch LLaMA Pro"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function VCRedistNeedsInstall: Boolean;
+var
+  Version: String;
+begin
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Version', Version) then
+    Result := False
+  else
+    Result := True;
+end;
+
+var
+  DownloadPage: TDownloadWizardPage;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  if (CurPageID = wpReady) and VCRedistNeedsInstall then
+  begin
+    DownloadPage.Clear;
+    DownloadPage.Add('https://aka.ms/vs/17/release/vc_redist.x64.exe', 'vc_redist.x64.exe', '');
+    DownloadPage.Show;
+    try
+      try
+        DownloadPage.Download;
+        Result := True;
+      except
+        if DownloadPage.AbortedByUser then
+          Log('Aborted by user.')
+        else
+          SuppressibleMsgBox(AddPeriod(GetExceptionMessage), mbCriticalError, MB_OK, IDOK);
+        Result := False;
+      end;
+    finally
+      DownloadPage.Hide;
+    end;
+  end else
+    Result := True;
+end;
