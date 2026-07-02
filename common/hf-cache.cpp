@@ -385,11 +385,15 @@ hf_files get_repo_files(const std::string & repo_id,
             fs::path final_path = commit_path / file.path;
             file.final_path = final_path.string();
 
-            if (!file.oid.empty() && !fs::exists(final_path)) {
-                fs::path local_path = blobs_path / file.oid;
-                file.local_path = local_path.string();
-            } else {
-                file.local_path = file.final_path;
+            {
+                std::error_code exists_ec;
+                bool exists = fs::exists(final_path, exists_ec);
+                if (!file.oid.empty() && !exists && !exists_ec) {
+                    fs::path local_path = blobs_path / file.oid;
+                    file.local_path = local_path.string();
+                } else {
+                    file.local_path = file.final_path;
+                }
             }
 
             files.push_back(file);
@@ -404,13 +408,19 @@ hf_files get_repo_files(const std::string & repo_id,
 
 static std::string get_cached_ref(const fs::path & repo_path) {
     fs::path refs_path = repo_path / "refs";
-    if (!fs::is_directory(refs_path)) {
+    std::error_code ec;
+    if (!fs::is_directory(refs_path, ec)) {
         return {};
     }
     std::string fallback;
 
-    for (const auto & entry : fs::directory_iterator(refs_path)) {
-        if (!entry.is_regular_file()) {
+    for (auto it = fs::directory_iterator(refs_path, ec); it != fs::directory_iterator(); it.increment(ec)) {
+        if (ec) {
+            break;
+        }
+        const auto & entry = *it;
+        std::error_code entry_ec;
+        if (!entry.is_regular_file(entry_ec)) {
             continue;
         }
         std::ifstream f(entry.path());
@@ -434,7 +444,8 @@ static std::string get_cached_ref(const fs::path & repo_path) {
 
 hf_files get_cached_files(const std::string & repo_id) {
     fs::path cache_dir = get_cache_directory();
-    if (!fs::exists(cache_dir)) {
+    std::error_code ec;
+    if (!fs::exists(cache_dir, ec)) {
         return {};
     }
 
@@ -445,13 +456,18 @@ hf_files get_cached_files(const std::string & repo_id) {
 
     hf_files files;
 
-    for (const auto & repo : fs::directory_iterator(cache_dir)) {
-        if (!repo.is_directory()) {
+    for (auto it = fs::directory_iterator(cache_dir, ec); it != fs::directory_iterator(); it.increment(ec)) {
+        if (ec) {
+            break;
+        }
+        const auto & repo = *it;
+        std::error_code repo_ec;
+        if (!repo.is_directory(repo_ec)) {
             continue;
         }
         fs::path snapshots_path = repo.path() / "snapshots";
 
-        if (!fs::exists(snapshots_path)) {
+        if (!fs::exists(snapshots_path, repo_ec)) {
             continue;
         }
         std::string _repo_id = folder_name_to_repo(repo.path().filename().string());
@@ -465,11 +481,19 @@ hf_files get_cached_files(const std::string & repo_id) {
         std::string commit = get_cached_ref(repo.path());
         fs::path commit_path = snapshots_path / commit;
 
-        if (commit.empty() || !fs::is_directory(commit_path)) {
+        if (commit.empty() || !fs::is_directory(commit_path, repo_ec)) {
             continue;
         }
-        for (const auto & entry : fs::recursive_directory_iterator(commit_path)) {
-            if (!entry.is_regular_file() && !entry.is_symlink()) {
+        std::error_code rec_ec;
+        for (auto entry_it = fs::recursive_directory_iterator(commit_path, fs::directory_options::skip_permission_denied, rec_ec);
+             entry_it != fs::recursive_directory_iterator();
+             entry_it.increment(rec_ec)) {
+            if (rec_ec) {
+                break;
+            }
+            const auto & entry = *entry_it;
+            std::error_code entry_ec;
+            if (!entry.is_regular_file(entry_ec) && !entry.is_symlink(entry_ec)) {
                 continue;
             }
             fs::path path = entry.path().lexically_relative(commit_path);
@@ -489,15 +513,22 @@ hf_files get_cached_files(const std::string & repo_id) {
     if (repo_id.empty() || repo_id == "local/models") {
         try {
             auto dir_opts = fs::directory_options::skip_permission_denied;
-            for (auto it = fs::recursive_directory_iterator(cache_dir, dir_opts); it != fs::recursive_directory_iterator(); ++it) {
-                if (it->is_directory()) {
+            std::error_code rec_ec;
+            for (auto it = fs::recursive_directory_iterator(cache_dir, dir_opts, rec_ec);
+                 it != fs::recursive_directory_iterator();
+                 it.increment(rec_ec)) {
+                if (rec_ec) {
+                    break;
+                }
+                std::error_code entry_ec;
+                if (it->is_directory(entry_ec)) {
                     std::string folder_name = it->path().filename().string();
                     if (folder_name.rfind("models--", 0) == 0) {
                         it.disable_recursion_pending();
                         continue;
                     }
                 }
-                if (it->is_regular_file() && it->path().extension() == ".gguf") {
+                if (it->is_regular_file(entry_ec) && it->path().extension() == ".gguf") {
                     hf_file file;
                     file.repo_id = "local/models";
                     file.path = it->path().filename().string();

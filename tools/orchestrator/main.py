@@ -353,6 +353,46 @@ async def delete_provider(provider_id: str):
         save_providers()
     return {"status": "success"}
 
+@app.get("/api/providers/{provider_id}/test")
+async def test_provider_keys(provider_id: str):
+    if provider_id not in providers_state:
+        return {"error": "Provider not configured"}
+    
+    p_conf = providers_state[provider_id]
+    base_url = p_conf.get("base_url", "").strip().rstrip("/")
+    api_keys = p_conf.get("api_keys", [])
+    
+    if not base_url or not api_keys:
+        return {"error": "Provider missing base URL or API keys"}
+        
+    results = []
+    async with httpx.AsyncClient() as client:
+        for key in api_keys:
+            if not key:
+                results.append({"valid": False, "error": "Empty key"})
+                continue
+            try:
+                headers = {"Authorization": f"Bearer {key}"}
+                if "openrouter" in base_url.lower():
+                    headers["HTTP-Referer"] = "http://localhost:8000"
+                    headers["X-Title"] = "LLaMA Server 2.0"
+                
+                url = get_models_url(base_url)
+                resp = await client.get(url, headers=headers, timeout=5.0)
+                # Some use /v1/models, some /models
+                if resp.status_code == 404:
+                    alt_url = f"{base_url}/models" if not base_url.endswith("/v1") else f"{base_url}/v1/models"
+                    resp = await client.get(alt_url, headers=headers, timeout=5.0)
+                    
+                if resp.status_code == 200:
+                    results.append({"valid": True})
+                else:
+                    results.append({"valid": False, "error": f"Status {resp.status_code}"})
+            except Exception as e:
+                results.append({"valid": False, "error": str(e)})
+                
+    return {"results": results}
+
 
 class ConnectionRequest(BaseModel):
     requester_ip: str
@@ -801,6 +841,28 @@ class ChatCompletionRequest(BaseModel):
 @app.api_route("/telemetry/sysinfo", methods=["GET"])
 async def proxy_management(request: Request):
     path = request.url.path
+    
+    # Intercept props/slots for virtual models to avoid infinite loops and return mock data
+    if path == "/props":
+        model = request.query_params.get("model", "")
+        if model == "swarm-ensemble" or ":" in model:
+            has_vision = any(x in model.lower() for x in ["vision", "gpt-4", "gemini", "claude-3", "grok", "mistral-large"])
+            return JSONResponse(content={
+                "default_generation_settings": {
+                    "n_ctx": 32768
+                },
+                "modalities": {
+                    "vision": has_vision,
+                    "audio": False,
+                    "video": False
+                }
+            })
+            
+    if path == "/slots":
+        model = request.query_params.get("model", "")
+        if model == "swarm-ensemble" or ":" in model:
+            return JSONResponse(content=[])
+
     url = f"http://127.0.0.1:8080{path}"
     
     body = await request.body()
@@ -961,6 +1023,18 @@ async def get_metrics():
 # Store loaded external models
 loaded_external_models = {}
 
+def get_models_url(base_url: str) -> str:
+    base_url = base_url.strip().rstrip("/")
+    if base_url.endswith("/v1"):
+        return f"{base_url}/models"
+    return f"{base_url}/v1/models"
+
+def get_chat_completions_url(base_url: str) -> str:
+    base_url = base_url.strip().rstrip("/")
+    if base_url.endswith("/v1"):
+        return f"{base_url}/chat/completions"
+    return f"{base_url}/v1/chat/completions"
+
 @app.get("/api/providers/models")
 async def get_provider_models():
     all_models = []
@@ -976,7 +1050,8 @@ async def get_provider_models():
                 if "openrouter" in base_url.lower():
                     headers["HTTP-Referer"] = "http://localhost:8000"
                     headers["X-Title"] = "LLaMA Server 2.0"
-                resp = await client.get(f"{base_url}/v1/models", headers=headers, timeout=5.0)
+                url = get_models_url(base_url)
+                resp = await client.get(url, headers=headers, timeout=5.0)
                 if resp.status_code == 200:
                     models = resp.json().get("data", [])
                     for m in models:
@@ -1111,7 +1186,8 @@ async def chat_completions(request: Request):
                             
                         try:
                             async with httpx.AsyncClient() as client:
-                                async with client.stream("POST", f"{base_url}/v1/chat/completions", json=body, headers=headers, timeout=60.0) as resp:
+                                url = get_chat_completions_url(base_url)
+                                async with client.stream("POST", url, json=body, headers=headers, timeout=60.0) as resp:
                                     if resp.status_code in [401, 402, 403, 429]:
                                         logger.warning(f"Key {i} for {p_id} returned {resp.status_code}. Falling back to next key...")
                                         continue
@@ -1135,7 +1211,8 @@ async def chat_completions(request: Request):
                         
                     try:
                         async with httpx.AsyncClient() as client:
-                            resp = await client.post(f"{base_url}/v1/chat/completions", json=body, headers=headers, timeout=120.0)
+                            url = get_chat_completions_url(base_url)
+                            resp = await client.post(url, json=body, headers=headers, timeout=120.0)
                             if resp.status_code in [401, 402, 403, 429]:
                                 logger.warning(f"Key {i} for {p_id} returned {resp.status_code}. Falling back to next key...")
                                 continue

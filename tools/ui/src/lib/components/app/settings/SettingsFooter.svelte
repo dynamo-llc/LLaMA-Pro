@@ -29,23 +29,23 @@
 	}
 </script>
 
-<div class="sticky bottom-4 z-50 mx-auto mt-8 flex w-full max-w-5xl items-center justify-between overflow-hidden rounded-2xl border border-border/40 bg-background/60 p-4 shadow-2xl shadow-black/5 backdrop-blur-xl transition-all dark:border-white/5 dark:bg-background/40 dark:shadow-black/20">
+<div class="static mx-auto mt-12 mb-8 flex w-full max-w-5xl items-center justify-between overflow-hidden rounded-2xl border border-primary/20 bg-card p-6 shadow-[0_0_40px_-15px_rgba(0,0,0,0.3)] shadow-primary/10 transition-all dark:border-primary/10 dark:bg-card/60">
 	<!-- Aesthetic decorative gradient background for Cyberpunk/Modern feel -->
-	<div class="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-r from-primary/5 via-transparent to-primary/5 opacity-50"></div>
+	<div class="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 opacity-60"></div>
 	
-	<div class="flex items-center gap-3 pl-2">
-		<div class="h-9 w-1.5 rounded-full bg-gradient-to-b from-primary to-primary/50"></div>
+	<div class="flex items-center gap-4 pl-2">
+		<div class="h-10 w-2 rounded-full bg-gradient-to-b from-primary to-primary/30 shadow-[0_0_10px_rgba(var(--primary),0.5)]"></div>
 		<div class="flex flex-col">
-			<span class="text-[11px] font-bold uppercase tracking-widest text-foreground/90">Action Center</span>
-			<span class="text-[10px] font-medium text-muted-foreground/80">Pending changes will not apply until saved</span>
+			<span class="text-[14px] font-bold uppercase tracking-widest text-foreground">Action Center</span>
+			<span class="text-[11px] font-medium text-muted-foreground mt-0.5">Pending changes will not apply until saved</span>
 		</div>
 	</div>
 
-	<div class="flex items-center gap-3 pr-2">
+	<div class="flex items-center gap-4 pr-2">
 		<Button 
 			variant="outline" 
 			onclick={handleResetClick} 
-			class="group h-10 rounded-xl border-dashed border-muted-foreground/30 bg-transparent transition-all duration-300 hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+			class="group h-11 px-6 rounded-xl border-dashed border-muted-foreground/30 bg-transparent transition-all duration-300 hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
 		>
 			<RotateCcw class="mr-2 h-4 w-4 transition-transform duration-500 ease-out group-hover:-rotate-[360deg]" />
 			Reset to default
@@ -53,9 +53,9 @@
 
 		<Button 
 			onclick={handleSave} 
-			class="h-10 rounded-xl px-8 font-semibold shadow-lg shadow-primary/25 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-primary/40 active:translate-y-0"
+			class="h-11 rounded-xl px-10 text-[13px] font-bold uppercase tracking-wider shadow-[0_0_20px_-5px_rgba(var(--primary),0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_0_25px_-2px_rgba(var(--primary),0.6)] active:translate-y-0"
 		>
-			Save settings
+			Save Settings
 		</Button>
 	</div>
 </div>

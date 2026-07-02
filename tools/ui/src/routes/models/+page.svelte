@@ -231,6 +231,42 @@
 		}
 	}
 
+	let testingProviderId = $state<string | null>(null);
+
+	async function testProviderKeys(providerId: string) {
+		testingProviderId = providerId;
+		try {
+			const res = await fetch(`${base}/api/providers/${providerId}/test`, {
+				headers: getAuthHeaders()
+			});
+			if (res.ok) {
+				const data = await res.json();
+				if (data.error) {
+					toast.error(`Test failed: ${data.error}`);
+				} else if (data.results) {
+					let allValid = true;
+					data.results.forEach((r: any, idx: number) => {
+						if (r.valid) {
+							toast.success(`Key ${idx + 1}: Valid`);
+						} else {
+							toast.error(`Key ${idx + 1}: Invalid (${r.error})`);
+							allValid = false;
+						}
+					});
+					if (allValid && data.results.length > 0) {
+						toast.success(`All keys for this provider are valid!`);
+					}
+				}
+			} else {
+				toast.error('Failed to test API keys');
+			}
+		} catch (e: any) {
+			toast.error(`Error: ${e.message}`);
+		} finally {
+			testingProviderId = null;
+		}
+	}
+
 	onMount(() => {
 		for (const p of SUPPORTED_PROVIDERS) {
 			if (!providerKeys[p.id]) providerKeys[p.id] = [''];
@@ -1688,6 +1724,16 @@
 											+ Add Key
 										</Button>
 										<Button
+											variant="secondary"
+											size="sm"
+											class="flex-1"
+											onclick={() => testProviderKeys(provider.id)}
+											disabled={testingProviderId === provider.id || !providerKeys[provider.id] || providerKeys[provider.id].every(k => k.trim() === '')}
+										>
+											{#if testingProviderId === provider.id}<Loader2 class="h-4 w-4 animate-spin mr-2" />{/if}
+											Test Keys
+										</Button>
+										<Button
 											size="sm"
 											class="flex-1"
 											onclick={() => saveProviderKey(provider.id, provider.name, provider.base_url)}
@@ -1732,7 +1778,7 @@
 					</div>
 				{:else}
 					<div class="grid gap-3">
-						{#each onlineModels as model (model.id)}
+						{#each onlineModels.filter(m => m.owned_by === selectedOnlineProviderId || m.owned_by === selectedOnlineProviderId + '_ai') as model (model.id)}
 							{@const isLoaded = modelsStore.isModelLoaded(model.id)}
 							<div
 								class="flex flex-col md:flex-row md:items-center justify-between gap-4 border border-border/30 rounded-xl p-4 bg-muted/10 hover:bg-muted/30 transition-colors"

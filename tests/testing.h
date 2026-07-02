@@ -109,7 +109,7 @@ struct testing {
             line.push_back(' ');
         }
 
-        out << line << status << "\n";
+        out << line << status << "\n" << std::flush;
     }
 
     template <typename F>
@@ -121,7 +121,7 @@ struct testing {
         }
 
         ++tests;
-        out << indent() << name << "\n";
+        out << indent() << name << "\n" << std::flush;
 
         int before_failures   = failures;
         int before_assertions = assertions;

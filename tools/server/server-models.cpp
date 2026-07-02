@@ -200,6 +200,10 @@ static std::vector<std::string> get_environment() {
 }
 
 void server_model_meta::update_args(common_preset_context & ctx_preset, std::string bin_path) {
+    if (name.find(':') != std::string::npos || name == "swarm-ensemble") {
+        args = {};
+        return;
+    }
     // update params
     unset_reserved_args(preset, false);
     preset.set_option(ctx_preset, "LLAMA_ARG_HOST",  CHILD_ADDR);
@@ -218,6 +222,10 @@ void server_model_meta::update_args(common_preset_context & ctx_preset, std::str
 }
 
 void server_model_meta::update_caps() {
+    if (name.find(':') != std::string::npos || name == "swarm-ensemble") {
+        multimodal = { false, false };
+        return;
+    }
     try {
         common_params params;
         preset.apply_to_params(params, {
@@ -707,6 +715,24 @@ std::optional<server_model_meta> server_models::get_meta(const std::string & nam
             return inst.meta;
         }
     }
+
+    if (!name.empty() && (name == "swarm-ensemble" || name.find(':') != std::string::npos)) {
+        server_model_meta meta;
+        meta.source = SERVER_MODEL_SOURCE_CACHE;
+        meta.name = name;
+        meta.status = SERVER_MODEL_STATUS_LOADED;
+        meta.port = 8000;
+        meta.stop_timeout = DEFAULT_STOP_TIMEOUT;
+        meta.multimodal = { false, false };
+
+        mapping[name] = instance_t{
+            /* subproc */ std::make_shared<server_subproc>(),
+            /* th      */ std::thread(),
+            /* meta    */ meta
+        };
+        return meta;
+    }
+
     return std::nullopt;
 }
 
@@ -820,6 +846,40 @@ void server_models::load(const std::string & name) {
 }
 
 void server_models::load(const std::string & name, const load_options & opts) {
+    if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+        std::unique_lock<std::mutex> lk(mutex);
+        server_model_meta meta;
+        if (opts.custom_meta.has_value()) {
+            meta = *opts.custom_meta;
+        } else if (mapping.find(name) != mapping.end()) {
+            meta = mapping[name].meta;
+        } else {
+            meta.source = SERVER_MODEL_SOURCE_CACHE;
+            meta.name = name;
+            meta.status = SERVER_MODEL_STATUS_UNLOADED;
+            meta.port = 8000;
+            meta.stop_timeout = DEFAULT_STOP_TIMEOUT;
+            meta.multimodal = { false, false };
+        }
+        meta.status = SERVER_MODEL_STATUS_LOADED;
+        meta.port = 8000;
+
+        mapping[name] = instance_t{
+            /* subproc */ std::make_shared<server_subproc>(),
+            /* th      */ std::thread(),
+            /* meta    */ meta
+        };
+
+        lk.unlock();
+        update_status(name, {
+            SERVER_MODEL_STATUS_LOADED,
+            0,
+            nullptr,
+            {}
+        });
+        return;
+    }
+
     if (!opts.custom_meta.has_value()) {
         if (!has_model(name)) {
             throw std::runtime_error("model name=" + name + " is not found");
@@ -1086,6 +1146,10 @@ void server_models::load(const std::string & name, const load_options & opts) {
 }
 
 void server_models::unload(const std::string & name) {
+    if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+        update_status(name, { SERVER_MODEL_STATUS_UNLOADED, 0 });
+        return;
+    }
     std::unique_lock<std::mutex> lk(mutex);
     auto it = mapping.find(name);
     if (it != mapping.end()) {
@@ -1203,6 +1267,12 @@ void server_models::update_download_progress(const std::string & name, const com
 }
 
 bool server_models::remove(const std::string & name) {
+    if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+        std::lock_guard<std::mutex> lk(mutex);
+        mapping.erase(name);
+        notify_sse("model_remove", name, {});
+        return true;
+    }
     // do everything under one lock acquisition; avoid get_meta() /
     // unload() because they can trigger load_models() which erases
     // transient DOWNLOADING / DOWNLOADED entries as a side-effect
@@ -1789,31 +1859,52 @@ void server_models_routes::init_routes() {
         std::string name = json_value(body, "model", std::string());
         auto meta = models.get_meta(name);
         if (!meta.has_value()) {
-            std::string name_lower = name;
-            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-            if (string_ends_with(name_lower, ".gguf")) {
-                std::error_code ec;
-                if (std::filesystem::exists(name, ec) && std::filesystem::is_regular_file(name, ec)) {
-                    server_model_meta new_meta;
-                    new_meta.source = SERVER_MODEL_SOURCE_PRESET;
-                    new_meta.name = name;
-                    new_meta.preset.set_option(models.ctx_preset, "LLAMA_ARG_MODEL", name);
-                    new_meta.status = SERVER_MODEL_STATUS_UNLOADED;
-                    new_meta.stop_timeout = DEFAULT_STOP_TIMEOUT;
-                    new_meta.multimodal = { false, false };
-                    new_meta.update_caps();
-
-                    {
-                        std::lock_guard<std::mutex> lk(models.mutex);
-                        try {
-                            models.add_model(std::move(new_meta));
-                        } catch (const std::exception & e) {
-                            res_err(res, format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
-                            return res;
-                        }
+            if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+                server_model_meta new_meta;
+                new_meta.source = SERVER_MODEL_SOURCE_CACHE;
+                new_meta.name = name;
+                new_meta.status = SERVER_MODEL_STATUS_UNLOADED;
+                new_meta.port = 8000;
+                new_meta.stop_timeout = DEFAULT_STOP_TIMEOUT;
+                new_meta.multimodal = { false, false };
+                {
+                    std::lock_guard<std::mutex> lk(models.mutex);
+                    try {
+                        models.add_model(std::move(new_meta));
+                    } catch (const std::exception & e) {
+                        res_err(res, format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+                        return res;
                     }
-                    models.notify_sse("models_reload", "*");
-                    meta = models.get_meta(name);
+                }
+                models.notify_sse("models_reload", "*");
+                meta = models.get_meta(name);
+            } else {
+                std::string name_lower = name;
+                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+                if (string_ends_with(name_lower, ".gguf")) {
+                    std::error_code ec;
+                    if (std::filesystem::exists(name, ec) && std::filesystem::is_regular_file(name, ec)) {
+                        server_model_meta new_meta;
+                        new_meta.source = SERVER_MODEL_SOURCE_PRESET;
+                        new_meta.name = name;
+                        new_meta.preset.set_option(models.ctx_preset, "LLAMA_ARG_MODEL", name);
+                        new_meta.status = SERVER_MODEL_STATUS_UNLOADED;
+                        new_meta.stop_timeout = DEFAULT_STOP_TIMEOUT;
+                        new_meta.multimodal = { false, false };
+                        new_meta.update_caps();
+
+                        {
+                            std::lock_guard<std::mutex> lk(models.mutex);
+                            try {
+                                models.add_model(std::move(new_meta));
+                            } catch (const std::exception & e) {
+                                res_err(res, format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+                                return res;
+                            }
+                        }
+                        models.notify_sse("models_reload", "*");
+                        meta = models.get_meta(name);
+                    }
                 }
             }
         }

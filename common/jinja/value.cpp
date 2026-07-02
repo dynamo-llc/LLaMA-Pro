@@ -754,25 +754,31 @@ const func_builtins & value_string_t::get_builtins() const {
             value val_input   = args.get_pos(0);
             value val_default = args.get_kwarg_or_pos("default", 1);
             value val_base    = args.get_kwarg_or_pos("base",    2);
-            const int base = val_base->is_undefined() ? 10 : val_base->as_int();
+            int base = 10;
+            if (!val_base->is_undefined() && is_val<value_int>(val_base)) {
+                base = val_base->as_int();
+            }
             if (is_val<value_string>(val_input) == false) {
-                throw raised_exception("int() first argument must be a string");
+                return val_default->is_undefined() ? mk_val<value_int>(0) : val_default;
             }
             std::string str = val_input->as_string().str();
             try {
                 return mk_val<value_int>(std::stoi(str, nullptr, base));
             } catch (...) {
-                return mk_val<value_int>(val_default->is_undefined() ? 0 : val_default->as_int());
+                return val_default->is_undefined() ? mk_val<value_int>(0) : val_default;
             }
         }},
         {"float", [](const func_args & args) -> value {
-            args.ensure_vals<value_string>();
+            value val_input = args.get_pos(0);
             value val_default = args.get_kwarg_or_pos("default", 1);
-            std::string str = args.get_pos(0)->as_string().str();
+            if (is_val<value_string>(val_input) == false) {
+                return val_default->is_undefined() ? mk_val<value_float>(0.0) : val_default;
+            }
+            std::string str = val_input->as_string().str();
             try {
                 return mk_val<value_float>(std::stod(str));
             } catch (...) {
-                return mk_val<value_float>(val_default->is_undefined() ? 0.0 : val_default->as_float());
+                return val_default->is_undefined() ? mk_val<value_float>(0.0) : val_default;
             }
         }},
         {"string", [](const func_args & args) -> value {

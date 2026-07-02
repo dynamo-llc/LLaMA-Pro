@@ -37,7 +37,11 @@ static void test_fuzzing(testing & t);
 
 static bool g_python_mode = false;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char ** argv) {
+    if (argc < 2) {
+        // Run all tests
+    }
+    
     testing t(std::cout);
     t.verbose = true;
 

@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, fork } = require('child_process');
 const serve = require('electron-serve');
 
 const loadURL = serve({ directory: path.join(__dirname, 'ui-dist') });
@@ -29,20 +29,20 @@ async function startBackendProcesses() {
   let echoCwd;
 
   if (isPackaged) {
-    const installedBinDir = path.resolve(path.join(process.resourcesPath, '../bin'));
+    const installedBinDir = path.join(process.resourcesPath, 'bin');
     const installedServer = path.join(installedBinDir, 'llama-server.exe');
-    const installedOrchestrator = path.join(installedBinDir, 'orchestrator.exe');
+    const installedOrchestrator = path.join(process.resourcesPath, 'orchestrator.exe');
 
     if (fs.existsSync(installedServer)) {
       serverPath = installedServer;
       orchestratorPath = installedOrchestrator;
       serverCwd = installedBinDir;
-      orchestratorCwd = installedBinDir;
-      latticaCwd = path.join(process.resourcesPath, '../tools/lattica');
-      latticaPath = 'npx.cmd';
-      latticaArgs = ['ts-node', 'daemon.ts'];
-      echoCwd = path.join(process.resourcesPath, '../tools/echo');
-      echoPath = 'node';
+      orchestratorCwd = process.resourcesPath;
+      latticaCwd = path.join(process.resourcesPath, 'lattica');
+      latticaPath = 'fork';
+      latticaArgs = ['dist/daemon.js'];
+      echoCwd = path.join(process.resourcesPath, 'echo');
+      echoPath = 'fork';
       echoArgs = ['index.js'];
     } else {
       // Dev/unpacked fallback (e.g. running from dist/win-unpacked directly)
@@ -95,20 +95,22 @@ async function startBackendProcesses() {
   }
 
   console.log(`Starting Lattica Daemon from: ${latticaCwd}`);
-  latticaProcess = spawn(latticaPath, latticaArgs, {
-    cwd: latticaCwd,
-    stdio: 'ignore'
-  });
+  if (latticaPath === 'fork') {
+    latticaProcess = fork(path.join(latticaCwd, latticaArgs[0]), [], { cwd: latticaCwd, stdio: 'ignore' });
+  } else {
+    latticaProcess = spawn(latticaPath, latticaArgs, { cwd: latticaCwd, stdio: 'ignore' });
+  }
   
   latticaProcess.on('error', (err) => {
     console.error('Failed to start Lattica daemon:', err);
   });
 
   console.log(`Starting Echo Server from: ${echoCwd}`);
-  echoProcess = spawn(echoPath, echoArgs, {
-    cwd: echoCwd,
-    stdio: 'ignore'
-  });
+  if (echoPath === 'fork') {
+    echoProcess = fork(path.join(echoCwd, echoArgs[0]), [], { cwd: echoCwd, stdio: 'ignore' });
+  } else {
+    echoProcess = spawn(echoPath, echoArgs, { cwd: echoCwd, stdio: 'ignore' });
+  }
   
   echoProcess.on('error', (err) => {
     console.error('Failed to start Echo server:', err);

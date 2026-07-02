@@ -208,7 +208,17 @@
 #    define _WIN32_WINNT 0x0A00
 #endif
 
+#ifdef __cplusplus
+#include <cstdbool>
+#else
+#if defined(_MSC_VER) && _MSC_VER < 1900
+#define bool _Bool
+#define true 1
+#define false 0
+#else
 #include <stdbool.h>
+#endif
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>

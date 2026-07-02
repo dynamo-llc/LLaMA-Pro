@@ -389,7 +389,7 @@
 								Distributed Ai Engine 2.0.3
 							</span>
 							<span class="text-[8px] text-muted-foreground px-2 pt-0.5 opacity-70">
-								by Dynamo.llc
+								&nbsp;&nbsp;by Dynamo.llc
 							</span>
 						</div>
 					</div>
