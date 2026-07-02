@@ -21,6 +21,13 @@
     "win": {
       "target": "dir"
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "LLaMA Pro"
+    },
     "files": [
       "main.js",
       "preload.js",
@@ -30,6 +37,27 @@
       {
         "from": "../ui/dist",
         "to": "ui-dist"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "../../build/bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../orchestrator/dist/orchestrator.exe",
+        "to": "orchestrator.exe"
+      },
+      {
+        "from": "../lattica",
+        "to": "lattica",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../echo",
+        "to": "echo",
+        "filter": ["**/*"]
       }
     ]
   }

@@ -1,7 +1,8 @@
 export enum ColorMode {
 	LIGHT = 'light',
 	DARK = 'dark',
-	SYSTEM = 'system'
+	SYSTEM = 'system',
+	CYBERPUNK = 'cyberpunk'
 }
 
 export enum TooltipSide {

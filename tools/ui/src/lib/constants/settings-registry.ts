@@ -14,7 +14,8 @@ import {
 	Sun,
 	Moon,
 	Target,
-	Globe
+	Globe,
+	Terminal
 } from '@lucide/svelte';
 import type { Component } from 'svelte';
 import type {
@@ -67,7 +68,8 @@ const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Co
 const COLOR_MODE_OPTIONS: Array<{ value: string; label: string; icon: Component }> = [
 	{ value: ColorMode.SYSTEM, label: 'System', icon: MonitorIcon },
 	{ value: ColorMode.LIGHT, label: 'Light', icon: Sun },
-	{ value: ColorMode.DARK, label: 'Dark', icon: Moon }
+	{ value: ColorMode.DARK, label: 'Dark', icon: Moon },
+	{ value: ColorMode.CYBERPUNK, label: 'Cyberpunk', icon: Terminal }
 ];
 
 const SETTINGS_REGISTRY: Record<string, SettingsSectionEntry> = {
