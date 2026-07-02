@@ -53,11 +53,16 @@ import {
 
 export function applyThemeMode(themeValue: ColorMode) {
 	if (!browser) return;
+
+	document.documentElement.classList.remove('cyberpunk', 'rainbow');
+
 	if (themeValue === ColorMode.CYBERPUNK) {
 		document.documentElement.classList.add('cyberpunk');
 		setMode('dark' as ColorMode);
+	} else if (themeValue === ColorMode.RAINBOW) {
+		document.documentElement.classList.add('rainbow');
+		setMode('light' as ColorMode);
 	} else {
-		document.documentElement.classList.remove('cyberpunk');
 		setMode(themeValue as ColorMode);
 	}
 }
