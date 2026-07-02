@@ -173,6 +173,74 @@
 	--code-foreground: oklch(0.3 0.1 300);
 }
 
+.neon-city {
+	--background: oklch(0.1 0 0); /* deep black */
+	--foreground: oklch(0.95 0.05 200); /* bright icy cyan/white text */
+	--card: oklch(0.15 0.05 280); /* very dark purple-blue */
+	--card-foreground: oklch(0.95 0.05 200);
+	--popover: oklch(0.15 0.05 280);
+	--popover-foreground: oklch(0.95 0.05 200);
+	
+	/* Tokyo Night Neon Colors */
+	--primary: oklch(0.7 0.3 330); /* Neon Magenta / Pink */
+	--primary-foreground: oklch(1 0 0); /* white text on primary */
+	--secondary: oklch(0.7 0.25 220); /* Electric Blue */
+	--secondary-foreground: oklch(0.1 0 0); /* dark text on secondary */
+	--muted: oklch(0.25 0.05 260); /* dark indigo */
+	--muted-foreground: oklch(0.7 0.1 260); /* pale indigo */
+	--accent: oklch(0.85 0.3 100); /* Neon Yellow */
+	--accent-foreground: oklch(0.1 0 0);
+	--destructive: oklch(0.6 0.3 20); /* Neon Red */
+	
+	--border: oklch(0.4 0.2 300); /* Neon purple border */
+	--input: oklch(0.2 0.1 260); /* dark indigo input */
+	--ring: oklch(0.7 0.3 330); /* Neon Magenta ring */
+	
+	--chart-1: oklch(0.7 0.3 330); /* Magenta */
+	--chart-2: oklch(0.7 0.25 220); /* Blue */
+	--chart-3: oklch(0.85 0.3 100); /* Yellow */
+	--chart-4: oklch(0.75 0.25 150); /* Green */
+	--chart-5: oklch(0.65 0.25 300); /* Purple */
+	
+	--sidebar: oklch(0.12 0.05 280);
+	--sidebar-foreground: oklch(0.95 0.05 200);
+	--sidebar-primary: oklch(0.7 0.3 330);
+	--sidebar-primary-foreground: oklch(1 0 0);
+	--sidebar-accent: oklch(0.25 0.1 300); /* purple highlight */
+	--sidebar-accent-foreground: oklch(0.95 0.05 200);
+	--sidebar-border: oklch(0.4 0.2 300);
+	--sidebar-ring: oklch(0.7 0.3 330);
+	
+	--code-background: oklch(0.15 0.05 280);
+	--code-foreground: oklch(0.85 0.3 100); /* neon yellow code */
+	
+	/* Glow Effects */
+	--glow-primary: 0 0 5px oklch(0.7 0.3 330 / 50%), 0 0 15px oklch(0.7 0.3 330 / 30%);
+	--glow-secondary: 0 0 5px oklch(0.7 0.25 220 / 50%), 0 0 15px oklch(0.7 0.25 220 / 30%);
+	--glow-accent: 0 0 5px oklch(0.85 0.3 100 / 50%), 0 0 15px oklch(0.85 0.3 100 / 30%);
+}
+
+.neon-city .text-primary, 
+.neon-city h1, .neon-city h2, .neon-city h3 {
+	text-shadow: var(--glow-primary);
+}
+
+.neon-city .bg-primary {
+	box-shadow: var(--glow-primary);
+}
+
+.neon-city * {
+	scrollbar-color: oklch(0.7 0.3 330 / 80%) transparent;
+}
+
+.neon-city *:hover::-webkit-scrollbar-thumb {
+	background: oklch(0.7 0.3 330 / 80%);
+}
+
+.neon-city *::-webkit-scrollbar-thumb:hover {
+	background: oklch(0.7 0.3 330);
+}
+
 @theme inline {
 	--radius-sm: calc(var(--radius) - 4px);
 	--radius-md: calc(var(--radius) - 2px);
@@ -418,6 +486,9 @@
 @layer base {
 	* {
 		@apply border-border outline-ring/50;
+		transition-property: background-color, border-color, color, fill, stroke, box-shadow, text-shadow;
+		transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+		transition-duration: 300ms;
 	}
 
 	body {

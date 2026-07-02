@@ -54,7 +54,7 @@ import {
 export function applyThemeMode(themeValue: ColorMode) {
 	if (!browser) return;
 
-	document.documentElement.classList.remove('cyberpunk', 'rainbow');
+	document.documentElement.classList.remove('cyberpunk', 'rainbow', 'neon-city');
 
 	if (themeValue === ColorMode.CYBERPUNK) {
 		document.documentElement.classList.add('cyberpunk');
@@ -62,6 +62,9 @@ export function applyThemeMode(themeValue: ColorMode) {
 	} else if (themeValue === ColorMode.RAINBOW) {
 		document.documentElement.classList.add('rainbow');
 		setMode('light' as ColorMode);
+	} else if (themeValue === ColorMode.NEON_CITY) {
+		document.documentElement.classList.add('neon-city');
+		setMode('dark' as ColorMode);
 	} else {
 		setMode(themeValue as ColorMode);
 	}

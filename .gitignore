@@ -170,11 +170,13 @@ gather_sysinfo.ps1
 
 # Nested build and packaging ignores
 tools/orchestrator/build/
+tools/orchestrator/dist/
 tools/desktop/dist/
 node_modules/
 *.pkg
 *.pyz
 *.asar
+*.bak
 /scratch/
 check_db.py
 

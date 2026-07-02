@@ -70,7 +70,8 @@ const COLOR_MODE_OPTIONS: Array<{ value: string; label: string; icon: Component 
 	{ value: ColorMode.SYSTEM, label: 'System', icon: MonitorIcon },
 	{ value: ColorMode.LIGHT, label: 'Light', icon: Sun },
 	{ value: ColorMode.DARK, label: 'Dark', icon: Moon },
-	{ value: ColorMode.CYBERPUNK, label: 'Cyberpunk', icon: Terminal },
+	{ value: ColorMode.CYBERPUNK, label: 'Hacker Console', icon: Terminal },
+	{ value: ColorMode.NEON_CITY, label: 'Neon City', icon: Moon },
 	{ value: ColorMode.RAINBOW, label: 'Rainbow', icon: Palette }
 ];
 
