@@ -18,7 +18,7 @@
 		type SettingsSection
 	} from '$lib/constants';
 	import { RouterService } from '$lib/services/router.service';
-	import { setMode } from 'mode-watcher';
+	import { applyThemeMode } from '$lib/stores/settings.svelte';
 	import { ColorMode } from '$lib/enums/ui.enums';
 	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
@@ -65,7 +65,7 @@
 
 	function handleThemeChange(newTheme: string) {
 		localConfig.theme = newTheme;
-		setMode(newTheme as ColorMode);
+		applyThemeMode(newTheme as ColorMode);
 	}
 
 	function handleConfigChange(key: string, value: string | boolean) {
@@ -74,7 +74,7 @@
 
 	function handleReset() {
 		localConfig = { ...config() };
-		setMode(localConfig.theme as ColorMode);
+		applyThemeMode(localConfig.theme as ColorMode);
 		mobileHeader?.updateCarousel();
 	}
 

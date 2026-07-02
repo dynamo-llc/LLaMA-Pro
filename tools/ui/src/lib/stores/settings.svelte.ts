@@ -51,6 +51,17 @@ import {
 	setConfigValue
 } from '$lib/utils';
 
+export function applyThemeMode(themeValue: ColorMode) {
+	if (!browser) return;
+	if (themeValue === ColorMode.CYBERPUNK) {
+		document.documentElement.classList.add('cyberpunk');
+		setMode('dark' as ColorMode);
+	} else {
+		document.documentElement.classList.remove('cyberpunk');
+		setMode(themeValue as ColorMode);
+	}
+}
+
 class SettingsStore {
 	/**
 	 *
@@ -105,7 +116,7 @@ class SettingsStore {
 			this.loadConfig();
 			this.migrateLegacyTheme();
 			// Apply the persisted theme from config on initial load
-			setMode(this.config[SETTINGS_KEYS.THEME] as ColorMode);
+			applyThemeMode(this.config[SETTINGS_KEYS.THEME] as ColorMode);
 			this.isInitialized = true;
 		} catch (error) {
 			console.error('Failed to initialize settings store:', error);
@@ -205,7 +216,7 @@ class SettingsStore {
 			this.config[SETTINGS_KEYS.THEME] = legacyTheme;
 			localStorage.removeItem('theme');
 			this.saveConfig();
-			setMode(legacyTheme as ColorMode);
+			applyThemeMode(legacyTheme as ColorMode);
 		}
 	}
 	/**
@@ -297,7 +308,7 @@ class SettingsStore {
 	updateTheme(newTheme: string) {
 		this.updateConfig(SETTINGS_KEYS.THEME, newTheme);
 
-		setMode(newTheme as ColorMode);
+		applyThemeMode(newTheme as ColorMode);
 	}
 
 	/**
@@ -324,7 +335,7 @@ class SettingsStore {
 	resetTheme() {
 		this.updateConfig(SETTINGS_KEYS.THEME, SETTING_CONFIG_DEFAULT[SETTINGS_KEYS.THEME]);
 
-		setMode(SETTING_CONFIG_DEFAULT[SETTINGS_KEYS.THEME] as ColorMode);
+		applyThemeMode(SETTING_CONFIG_DEFAULT[SETTINGS_KEYS.THEME] as ColorMode);
 	}
 
 	/**
@@ -401,7 +412,7 @@ class SettingsStore {
 
 					// theme lives in mode-watcher, not just in config -> propagate
 					if (key === SETTINGS_KEYS.THEME) {
-						setMode(value as ColorMode);
+						applyThemeMode(value as ColorMode);
 					}
 				}
 			}
@@ -576,7 +587,7 @@ class SettingsStore {
 		this.saveConfig();
 
 		// Apply theme for immediate visual feedback
-		setMode(this.config[SETTINGS_KEYS.THEME] as ColorMode);
+		applyThemeMode(this.config[SETTINGS_KEYS.THEME] as ColorMode);
 
 		console.log('Settings imported successfully');
 	}
