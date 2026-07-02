@@ -380,7 +380,7 @@
 							<img
 								src={`${base}/header-logo.png`}
 								alt="LLaMA Pro"
-								class="h-6 md:h-7 object-contain"
+								class="h-6 md:h-7 object-contain dark:invert"
 							/>
 						</div>
 						<div class="h-3 w-px bg-border"></div>
