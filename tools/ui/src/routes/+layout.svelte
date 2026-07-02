@@ -444,7 +444,7 @@
 							<div
 								class="marquee-content text-zinc-700 dark:text-zinc-300 font-pixel whitespace-nowrap text-[9px] md:text-[10px]"
 							>
-								✦ Distributed Ai Engine Feature: Local LoRA Training to fine-tune models directly on your hardware ✦ Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip: Extend capabilities with custom MCP server integrations ✦ Feature: Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and run the newest models from Hugging Face ✦ Feature: Run fully local, private AI models on consumer hardware with ggml quantization ✦ Feature: Real-time Telemetry & Advanced prompt engineering controls ✦
+								✦ Distributed Ai Engine Feature: Local LoRA Training to fine-tune models directly on your hardware ✦ Feature: Remote Access with Cloudflare Tunnels and Local Network Discovery ✦ Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip: Extend capabilities with custom MCP server integrations ✦ Feature: Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and run the newest models from Hugging Face ✦ Feature: Premium Themes like Neon City and Hacker Console with glassmorphism ✦ Feature: Run fully local, private AI models on consumer hardware with ggml quantization ✦ Feature: Real-time Telemetry & Advanced prompt engineering controls ✦
 							</div>
 						</div>
 					</div>
