@@ -384,10 +384,14 @@
 							/>
 						</div>
 						<div class="h-3 w-px bg-border"></div>
-						<span
-							class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md"
-							>Ai Engine v2.0</span
-						>
+						<div class="flex flex-col items-start">
+							<span class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md leading-tight">
+								Distributed Ai Engine 2.0.3
+							</span>
+							<span class="text-[8px] text-muted-foreground px-2 pt-0.5 opacity-70">
+								by Dynamo.llc
+							</span>
+						</div>
 					</div>
 
 					<!-- Center: Scrolling News Feed -->
@@ -398,11 +402,7 @@
 							<div
 								class="marquee-content text-zinc-700 dark:text-zinc-300 font-pixel whitespace-nowrap text-[9px] md:text-[10px]"
 							>
-								✦ LLaMA Pro Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip:
-								You can extend capabilities with custom MCP server integrations ✦ LLaMA Pro Feature:
-								Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and
-								run the newest, latest, and greatest models from Hugging Face ✦ Feature: Run fully
-								local, private AI models on consumer hardware with ggml quantization ✦
+								✦ Distributed Ai Engine Feature: Local LoRA Training to fine-tune models directly on your hardware ✦ Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip: Extend capabilities with custom MCP server integrations ✦ Feature: Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and run the newest models from Hugging Face ✦ Feature: Run fully local, private AI models on consumer hardware with ggml quantization ✦ Feature: Real-time Telemetry & Advanced prompt engineering controls ✦
 							</div>
 						</div>
 					</div>
