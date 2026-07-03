@@ -874,12 +874,39 @@ class ModelsStore {
 		}
 	}
 
+	private isApiModel(modelId: string): boolean {
+		const SUPPORTED_PROVIDERS = [
+			'openrouter:', 'openai:', 'google:', 'zai:', 'groq:', 'together:',
+			'mistral:', 'deepseek:', 'fireworks:', 'anyscale:', 'xai:',
+			'hyperbolic:', 'sambanova:'
+		];
+		return SUPPORTED_PROVIDERS.some((prefix) => modelId.startsWith(prefix));
+	}
+
 	async loadModel(modelId: string): Promise<void> {
 		if (this.isModelLoaded(modelId)) return;
 		if (this.modelLoadingStates.get(modelId)) return;
 
 		this.modelLoadingStates.set(modelId, true);
 		this.error = null;
+
+		if (this.isApiModel(modelId)) {
+			let model = this.routerModels.find((m) => m.id === modelId);
+			if (!model) {
+				// Inject the virtual model into routerModels
+				model = {
+					id: modelId,
+					object: 'model',
+					status: { value: ServerModelStatus.LOADED }
+				} as ApiRouterModel;
+				this.routerModels = [...this.routerModels, model];
+			} else {
+				this.setRouterModelStatus(modelId, ServerModelStatus.LOADED);
+			}
+			this.modelLoadingStates.set(modelId, false);
+			toast.success(`Virtual model loaded: ${this.toDisplayName(modelId)}`);
+			return;
+		}
 
 		// the feed drives completion, so it must be live before the request
 		this.subscribeStatus();
@@ -908,6 +935,13 @@ class ModelsStore {
 
 		this.modelLoadingStates.set(modelId, true);
 		this.error = null;
+
+		if (this.isApiModel(modelId)) {
+			this.routerModels = this.routerModels.filter((m) => m.id !== modelId);
+			this.modelLoadingStates.set(modelId, false);
+			toast.info(`Virtual model unloaded: ${this.toDisplayName(modelId)}`);
+			return;
+		}
 
 		this.subscribeStatus();
 

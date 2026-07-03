@@ -429,7 +429,7 @@
 						<div class="h-3 w-px bg-border"></div>
 						<div class="flex flex-col items-start">
 							<span class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md leading-tight">
-								Distributed Ai Engine 2.0.3
+								Distributed Ai Engine 2.0.4
 							</span>
 							<span class="text-[8px] text-muted-foreground px-2 pt-0.5 opacity-70">
 								&nbsp;&nbsp;by <a href="http://www.dynamo.llc" target="_blank" rel="noopener noreferrer" class="hover:text-primary transition-colors cursor-pointer underline underline-offset-2">Dynamo.llc</a>
@@ -546,7 +546,7 @@
 
 	.marquee-content {
 		display: inline-block;
-		animation: scroll-right-to-left 60s linear infinite;
+		animation: scroll-right-to-left 120s linear infinite;
 	}
 
 	@keyframes scroll-right-to-left {

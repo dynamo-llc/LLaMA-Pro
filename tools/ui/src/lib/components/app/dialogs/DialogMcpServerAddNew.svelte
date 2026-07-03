@@ -21,11 +21,6 @@
 
 	const PRESETS: Preset[] = [
 		{
-			name: 'DuckDuckGo News',
-			url: 'http://localhost:8004/sse',
-			description: 'Fetch the latest news articles (no API key required)'
-		},
-		{
 			name: 'SQLite Database',
 			url: 'http://localhost:8030/sse',
 			description: 'Read and write local SQL databases'
@@ -36,11 +31,6 @@
 			description: 'Access local directory files and logs'
 		},
 		{
-			name: 'Fetch Web Page',
-			url: 'http://localhost:8005/sse',
-			description: 'Scrape web pages and extract markdown content'
-		},
-		{
 			name: 'Puppeteer Browser',
 			url: 'http://localhost:8006/sse',
 			description: 'Automate web browsing and capture screenshots'
@@ -48,8 +38,7 @@
 		{
 			name: 'Ghidra (Headless)',
 			url: 'http://localhost:8081/sse',
-			description:
-				'Analyze binaries, batch write, and run custom Python scripts headlessly using PyGhidra'
+			description: 'Analyze binaries, batch write, and run custom Python scripts headlessly using PyGhidra'
 		},
 		{
 			name: 'IDA Pro',
@@ -57,37 +46,9 @@
 			description: 'Decompile, read memory, and rename variables inside IDA Pro'
 		},
 		{
-			name: 'Playwright',
-			url: 'http://localhost:8015/sse',
-			description: 'Programmatic browser automation and end-to-end testing'
-		},
-		{
-			name: 'GitHub',
-			url: 'http://localhost:8017/sse',
-			description: 'Read repositories, create issues, submit PRs, and manage version control',
-			headers: '{\n  "Authorization": "token YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"\n}'
-		},
-		{
-			name: 'Chrome DevTools (Browsertools)',
-			url: 'http://localhost:8019/sse',
-			description: 'Connect directly to Chrome Developer Tools for runtime and console logs'
-		},
-		{
 			name: 'Memory',
 			url: 'http://localhost:8021/sse',
-			description:
-				'Local semantic memory graph database that persists facts and entities across sessions'
-		},
-		{
-			name: 'PostgreSQL',
-			url: 'http://localhost:8023/sse',
-			description: 'Connect directly to PostgreSQL databases to read schemas and execute queries'
-		},
-		{
-			name: 'Jupyter Notebook',
-			url: 'http://localhost:8024/sse',
-			description:
-				'Stateful Jupyter Python kernel for calculations, data analysis, and chart generation'
+			description: 'Local semantic memory graph database that persists facts and entities across sessions'
 		}
 	];
 

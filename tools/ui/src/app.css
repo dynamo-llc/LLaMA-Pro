@@ -187,7 +187,7 @@
 	--secondary: oklch(0.7 0.25 220); /* Electric Blue */
 	--secondary-foreground: oklch(0.1 0 0); /* dark text on secondary */
 	--muted: oklch(0.25 0.05 260); /* dark indigo */
-	--muted-foreground: oklch(0.7 0.1 260); /* pale indigo */
+	--muted-foreground: oklch(0.85 0.05 260); /* pale indigo */
 	--accent: oklch(0.85 0.3 100); /* Neon Yellow */
 	--accent-foreground: oklch(0.1 0 0);
 	--destructive: oklch(0.6 0.3 20); /* Neon Red */
