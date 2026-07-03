@@ -29,6 +29,7 @@ from langgraph.graph import StateGraph, START, END
 from ui.graph import create_ui_graph
 
 from tunnel import TunnelManager, get_local_ip
+from news import news_manager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -484,6 +485,12 @@ async def startup_event():
     asyncio.create_task(cleanup_stale_peers())
     # Auto-start local MCP servers
     start_local_mcp_servers()
+    # Start news fetcher
+    news_manager.start_background_fetch()
+
+@app.get("/api/news")
+async def get_news():
+    return JSONResponse(content=news_manager.get_news())
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -1,4 +1,4 @@
-import { Search, Settings, SquarePen, Activity, Files, Terminal } from '@lucide/svelte';
+import { Search, Settings, SquarePen, Activity, Files, Terminal, Newspaper } from '@lucide/svelte';
 import McpLogo from '$lib/components/app/mcp/McpLogo.svelte';
 import type { Component } from 'svelte';
 import { ROUTES } from './routes';
@@ -45,6 +45,12 @@ export const SIDEBAR_ACTIONS_ITEMS: DesktopIconStripItem[] = [
 		tooltip: 'Live Terminal',
 		route: ROUTES.TERMINAL,
 		activeRouteId: '/terminal'
+	},
+	{
+		icon: Newspaper,
+		tooltip: 'News & Updates',
+		route: ROUTES.NEWS,
+		activeRouteId: '/news'
 	},
 	{
 		icon: Settings,
