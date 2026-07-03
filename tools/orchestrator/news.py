@@ -122,4 +122,8 @@ class NewsManager:
             self.fetch_external_news()
         return self.news_cache
 
+    def force_refresh(self):
+        self.fetch_external_news()
+        return self.news_cache
+
 news_manager = NewsManager()

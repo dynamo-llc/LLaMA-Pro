@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ExternalLink, X } from '@lucide/svelte';
+	import { ExternalLink, X, RefreshCw } from '@lucide/svelte';
 	
 	interface NewsItem {
 		id: string;
@@ -19,17 +19,21 @@
 	let error = $state('');
 	
 	let expandedItem: NewsItem | null = $state(null);
+	let refreshing = $state(false);
+
+	function getBaseUrl() {
+		let port = '8000';
+		if (typeof window !== 'undefined' && (window as any).orchestratorPort) {
+			port = (window as any).orchestratorPort;
+		}
+		const host = window.location.hostname;
+		const protocol = window.location.protocol === 'app:' ? 'http:' : window.location.protocol;
+		return `${protocol}//${host}:${port}`;
+	}
 	
 	onMount(async () => {
 		try {
-			// We can fetch from orchestrator port
-			let port = '8000';
-			if (typeof window !== 'undefined' && (window as any).orchestratorPort) {
-				port = (window as any).orchestratorPort;
-			}
-			const host = window.location.hostname;
-			const protocol = window.location.protocol === 'app:' ? 'http:' : window.location.protocol;
-			const baseUrl = `${protocol}//${host}:${port}`;
+			const baseUrl = getBaseUrl();
 			
 			const res = await fetch(`${baseUrl}/api/news`);
 			if (!res.ok) throw new Error('Failed to fetch news');
@@ -40,6 +44,21 @@
 			loading = false;
 		}
 	});
+
+	async function refreshNews() {
+		if (refreshing) return;
+		refreshing = true;
+		try {
+			const baseUrl = getBaseUrl();
+			const res = await fetch(`${baseUrl}/api/news/refresh`, { method: 'POST' });
+			if (!res.ok) throw new Error('Failed to refresh news');
+			newsItems = await res.json();
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			refreshing = false;
+		}
+	}
 
 	function handleExpand(item: NewsItem) {
 		expandedItem = item;
@@ -60,7 +79,17 @@
 
 <div class="h-full w-full overflow-y-auto bg-background/95 p-6 md:p-10 relative">
 	<div class="max-w-7xl mx-auto">
-		<h1 class="text-4xl font-black tracking-tight mb-2 text-foreground">News & Discoveries</h1>
+		<div class="flex items-start justify-between mb-2">
+			<h1 class="text-4xl font-black tracking-tight text-foreground">News & Discoveries</h1>
+			<button 
+				class="flex items-center gap-2 px-3 py-1.5 bg-card/50 hover:bg-card border border-border/50 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground transition-all {refreshing ? 'opacity-50 cursor-not-allowed' : ''}"
+				onclick={refreshNews}
+				disabled={refreshing}
+			>
+				<RefreshCw class="w-4 h-4 {refreshing ? 'animate-spin' : ''}" />
+				<span>Refresh</span>
+			</button>
+		</div>
 		<p class="text-muted-foreground mb-8 text-lg">Stay updated with the latest in open weights AI and explore new capabilities.</p>
 		
 		{#if loading}

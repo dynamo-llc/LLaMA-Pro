@@ -492,6 +492,10 @@ async def startup_event():
 async def get_news():
     return JSONResponse(content=news_manager.get_news())
 
+@app.post("/api/news/refresh")
+async def refresh_news():
+    return JSONResponse(content=news_manager.force_refresh())
+
 @app.on_event("shutdown")
 async def shutdown_event():
     stop_rpc_server()
