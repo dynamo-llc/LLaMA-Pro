@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('tts_models/*', 'tts_models')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

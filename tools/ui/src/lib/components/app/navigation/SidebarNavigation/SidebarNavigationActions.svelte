@@ -16,6 +16,7 @@
 	import { circIn } from 'svelte/easing';
 	import { onMount } from 'svelte';
 	import type { Component } from 'svelte';
+	import { companionStore } from '$lib/services/companion.svelte';
 
 	interface Props {
 		class: string;
@@ -107,11 +108,15 @@
 		{#each SIDEBAR_ACTIONS_ITEMS as item, i (item.tooltip)}
 			{@const isActive = isItemActive(item)}
 			{@const isSearchOnMobile = item.icon === Search && isMobile.current}
-			{@const itemHref = isSearchOnMobile ? ROUTES.SEARCH : item.route}
+			{@const itemHref = isSearchOnMobile ? ROUTES.SEARCH : (item.route === ROUTES.COMPANION ? undefined : item.route)}
 			{@const itemOnClick = item.route
 				? () => {
 						onNewChat?.();
-						goto(item.route!);
+						if (item.route === ROUTES.COMPANION) {
+							companionStore.open();
+						} else {
+							goto(item.route!);
+						}
 					}
 				: isSearchOnMobile
 					? undefined
@@ -128,8 +133,8 @@
 				<div transition:fade={itemTransition}>
 					<Button
 						class="w-full min-w-9 justify-between px-2 backdrop-blur-none! hover:[&>kbd]:opacity-100 {isActive
-							? 'bg-accent text-accent-foreground'
-							: ''}"
+							? 'bg-accent text-foreground hover:text-foreground'
+							: 'text-muted-foreground hover:text-foreground'}"
 						href={itemHref}
 						onclick={itemOnClick}
 						variant="ghost"
@@ -163,7 +168,11 @@
 			{@const itemOnClick = item.route
 				? () => {
 						onNewChat?.();
-						goto(item.route!);
+						if (item.route === ROUTES.COMPANION) {
+							companionStore.open();
+						} else {
+							goto(item.route!);
+						}
 					}
 				: isSearchOnMobile
 					? undefined
@@ -185,8 +194,8 @@
 						size="lg"
 						iconSize="h-4 w-4"
 						class="h-9 w-9 rounded-full hover:bg-accent! {isActive
-							? 'bg-accent text-accent-foreground'
-							: ''}"
+							? 'bg-accent text-foreground hover:text-foreground'
+							: 'text-muted-foreground hover:text-foreground'}"
 						onclick={itemOnClick}
 					/>
 				</div>

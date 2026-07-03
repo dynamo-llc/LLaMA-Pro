@@ -1,4 +1,4 @@
-import { Search, Settings, SquarePen, Activity, Files, Terminal, Newspaper } from '@lucide/svelte';
+import { Search, Settings, SquarePen, Activity, Files, Terminal, Newspaper, Smartphone, Bot } from '@lucide/svelte';
 import McpLogo from '$lib/components/app/mcp/McpLogo.svelte';
 import type { Component } from 'svelte';
 import { ROUTES } from './routes';
@@ -20,6 +20,12 @@ export interface DesktopIconStripItem {
 }
 
 export const SIDEBAR_ACTIONS_ITEMS: DesktopIconStripItem[] = [
+	{
+		icon: Bot,
+		tooltip: 'HAL 9000',
+		route: ROUTES.COMPANION,
+		activeRouteId: '/companion'
+	},
 	{ icon: SquarePen, tooltip: 'New chat', route: ROUTES.NEW_CHAT, keys: ['shift', 'cmd', 'o'] },
 	{ icon: Search, tooltip: 'Search', keys: ['cmd', 'k'] },
 	{
@@ -48,10 +54,11 @@ export const SIDEBAR_ACTIONS_ITEMS: DesktopIconStripItem[] = [
 	},
 	{
 		icon: Newspaper,
-		tooltip: 'News & Updates',
+		tooltip: 'News & Discoveries',
 		route: ROUTES.NEWS,
 		activeRouteId: '/news'
 	},
+
 	{
 		icon: Settings,
 		tooltip: 'Settings',

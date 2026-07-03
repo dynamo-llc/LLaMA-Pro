@@ -1,0 +1,64 @@
+[
+    {
+        "name": "DuckDuckGo News", 
+        "port": 8004, 
+        "cmd": ["node", "index.js"],
+        "cwd": "tools/mcp/duckduckgo-news"
+    },
+    {
+        "name": "Puppeteer Browser", 
+        "port": 8006, 
+        "cmd": ["node", "index.js"],
+        "cwd": "tools/mcp/puppeteer-browser"
+    },
+    {
+        "name": "Filesystem", 
+        "port": 8003, 
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8003", "--stdio", "npx -y @modelcontextprotocol/server-filesystem C:\\Users\\MONSTER\\Desktop", "--cors"]
+    },
+    {
+        "name": "Fetch Web Page", 
+        "port": 8005, 
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8005", "--stdio", "npx -y mcp-fetch-server", "--cors"]
+    },
+    {
+        "name": "Playwright", 
+        "port": 8015, 
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8015", "--stdio", "npx -y @playwright/mcp", "--cors"]
+    },
+    {
+        "name": "Memory", 
+        "port": 8021, 
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8021", "--stdio", "npx -y @modelcontextprotocol/server-memory", "--cors"]
+    },
+    {
+        "name": "Ghidra (Headless)", 
+        "port": 8081, 
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8081", "--stdio", "C:\\Users\\MONSTER\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe E:\\GHIDRA\\bridge_mcp_ghidra_headless.py", "--cors"]
+    },
+    {
+        "name": "IDA Pro", 
+        "port": 8082, 
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8082", "--stdio", "C:\\Users\\MONSTER\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe E:\\PROJECTS\\EZLLM\\server\\bridges\\bridge_mcp_ida.py --ida-server http://127.0.0.1:8081/", "--cors"]
+    },
+    {
+        "name": "SQLite Database",
+        "port": 8030,
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8030", "--stdio", "npx -y mcp-server-sqlite --db C:\\Users\\MONSTER\\Desktop\\llama_mcp.db", "--cors"]
+    },
+    {
+        "name": "Chrome DevTools",
+        "port": 8019,
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8019", "--stdio", "npx -y chrome-devtools-mcp --autoConnect", "--cors"]
+    },
+    {
+        "name": "PostgreSQL",
+        "port": 8023,
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8023", "--stdio", "npx -y @modelcontextprotocol/server-postgres postgresql://postgres:postgres@localhost:5432/postgres", "--cors"]
+    },
+    {
+        "name": "GitHub",
+        "port": 8017,
+        "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8017", "--stdio", "npx -y @modelcontextprotocol/server-github", "--cors"]
+    }
+]

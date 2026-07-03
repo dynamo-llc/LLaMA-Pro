@@ -1,12 +1,13 @@
 {
   "name": "llama-pro",
-  "version": "2.0.4",
+  "version": "2.0.6",
   "description": "LLaMA Pro Desktop Wrapper",
   "repository": "https://github.com/example/llama-pro",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win -p always"
+    "build": "electron-builder",
+    "build:publish": "electron-builder -p always"
   },
   "dependencies": {
     "electron-serve": "^1.3.0",
@@ -19,7 +20,7 @@
   "build": {
     "appId": "com.llama.pro",
     "productName": "LLaMA Pro",
-    "compression": "store",
+    "compression": "normal",
     "publish": [
       {
         "provider": "github",
@@ -53,21 +54,31 @@
       {
         "from": "../../build/bin",
         "to": "bin",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
-        "from": "../orchestrator/dist/orchestrator.exe",
-        "to": "orchestrator.exe"
+        "from": "../orchestrator/dist",
+        "to": ".",
+        "filter": [
+          "orchestrator",
+          "orchestrator.exe"
+        ]
       },
       {
         "from": "../lattica",
         "to": "lattica",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../echo",
         "to": "echo",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   }

@@ -72,6 +72,8 @@ class ModelsStore {
 	>();
 
 	favoriteModelIds = $state<Set<string>>(this.loadFavoritesFromStorage());
+	autoLoadCompanionModelEnabled = $state<boolean>(this.loadAutoLoadFromStorage());
+	private hasAutoLoadedCompanionModel = false;
 
 	/**
 	 * Model-specific props cache with TTL.
@@ -347,6 +349,19 @@ class ModelsStore {
 
 				if (visible.length === 1 && this.isModelLoaded(visible[0].model)) {
 					this.selectModelById(visible[0].id);
+				}
+
+				if (!this.hasAutoLoadedCompanionModel) {
+					this.hasAutoLoadedCompanionModel = true;
+					if (this.autoLoadCompanionModelEnabled && this.loadedModelIds.length === 0) {
+						try {
+							const companionModel = 'unsloth/Llama-3.2-1B-Instruct-GGUF:Q4_K_M';
+							console.log('[modelsStore] Auto-loading companion model:', companionModel);
+							await ModelsService.load(companionModel);
+						} catch (err) {
+							console.error('[modelsStore] Failed to auto-load companion model', err);
+						}
+					}
 				}
 			} else {
 				this.models = await this.fetchModelModeInternal();
@@ -892,19 +907,30 @@ class ModelsStore {
 
 		if (this.isApiModel(modelId)) {
 			let model = this.routerModels.find((m) => m.id === modelId);
-			if (!model) {
-				// Inject the virtual model into routerModels
-				model = {
-					id: modelId,
-					object: 'model',
-					status: { value: ServerModelStatus.LOADED }
-				} as ApiRouterModel;
-				this.routerModels = [...this.routerModels, model];
-			} else {
-				this.setRouterModelStatus(modelId, ServerModelStatus.LOADED);
+			try {
+				const res = await fetch(`${base}/api/models/load`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+					body: JSON.stringify({ model: modelId })
+				});
+				if (!res.ok) throw new Error('Failed to load virtual model in orchestrator');
+				
+				if (!model) {
+					model = {
+						id: modelId,
+						object: 'model',
+						status: { value: ServerModelStatus.LOADED }
+					} as ApiRouterModel;
+					this.routerModels = [...this.routerModels, model];
+				} else {
+					this.setRouterModelStatus(modelId, ServerModelStatus.LOADED);
+				}
+				toast.success(`Virtual model loaded: ${this.toDisplayName(modelId)}`);
+			} catch (error) {
+				toast.error(`Failed to load virtual model: ${this.toDisplayName(modelId)}`);
+			} finally {
+				this.modelLoadingStates.set(modelId, false);
 			}
-			this.modelLoadingStates.set(modelId, false);
-			toast.success(`Virtual model loaded: ${this.toDisplayName(modelId)}`);
 			return;
 		}
 
@@ -937,9 +963,21 @@ class ModelsStore {
 		this.error = null;
 
 		if (this.isApiModel(modelId)) {
-			this.routerModels = this.routerModels.filter((m) => m.id !== modelId);
-			this.modelLoadingStates.set(modelId, false);
-			toast.info(`Virtual model unloaded: ${this.toDisplayName(modelId)}`);
+			try {
+				const res = await fetch(`${base}/api/models/unload`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+					body: JSON.stringify({ model: modelId })
+				});
+				if (!res.ok) throw new Error('Failed to unload virtual model in orchestrator');
+
+				this.routerModels = this.routerModels.filter((m) => m.id !== modelId);
+				toast.info(`Virtual model unloaded: ${this.toDisplayName(modelId)}`);
+			} catch (error) {
+				toast.error(`Failed to unload virtual model: ${this.toDisplayName(modelId)}`);
+			} finally {
+				this.modelLoadingStates.set(modelId, false);
+			}
 			return;
 		}
 
@@ -998,12 +1036,28 @@ class ModelsStore {
 	}
 
 	private loadFavoritesFromStorage(): Set<string> {
+		if (typeof localStorage === 'undefined') return new Set();
 		try {
-			const raw = localStorage.getItem(FAVORITE_MODELS_LOCALSTORAGE_KEY);
-			return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
-		} catch {
-			toast.error('Failed to load favorite models from local storage');
+			const stored = localStorage.getItem(FAVORITE_MODELS_LOCALSTORAGE_KEY);
+			if (!stored) return new Set();
+			const parsed = JSON.parse(stored);
+			return new Set(Array.isArray(parsed) ? parsed : []);
+		} catch (e) {
+			console.warn('Failed to load favorite models from local storage', e);
 			return new Set();
+		}
+	}
+
+	private loadAutoLoadFromStorage(): boolean {
+		if (typeof localStorage === 'undefined') return true;
+		const stored = localStorage.getItem('autoLoadCompanionModel');
+		return stored === null ? true : stored === 'true';
+	}
+
+	setAutoLoadCompanionModel(enabled: boolean): void {
+		this.autoLoadCompanionModelEnabled = enabled;
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem('autoLoadCompanionModel', enabled ? 'true' : 'false');
 		}
 	}
 
@@ -1073,6 +1127,7 @@ export const propsCacheVersion = () => modelsStore.propsCacheVersion;
 export const singleModelName = () => modelsStore.singleModelName;
 export const selectedModelContextSize = () => modelsStore.selectedModelContextSize;
 export const favoriteModelIds = () => modelsStore.favoriteModelIds;
+export const autoLoadCompanionModelEnabled = () => modelsStore.autoLoadCompanionModelEnabled;
 export const supportsThinking = () => modelsStore.supportsThinking;
 export const checkModelSupportsThinking = (modelId: string) =>
 	modelsStore.checkModelSupportsThinking(modelId);

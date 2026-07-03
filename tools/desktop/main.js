@@ -58,9 +58,10 @@ async function startBackendProcesses() {
   let echoCwd;
 
   if (isPackaged) {
+    const ext = process.platform === 'win32' ? '.exe' : '';
     const installedBinDir = path.join(process.resourcesPath, 'bin');
-    const installedServer = path.join(installedBinDir, 'llama-server.exe');
-    const installedOrchestrator = path.join(process.resourcesPath, 'orchestrator.exe');
+    const installedServer = path.join(installedBinDir, `llama-server${ext}`);
+    const installedOrchestrator = path.join(process.resourcesPath, `orchestrator${ext}`);
 
     if (fs.existsSync(installedServer)) {
       serverPath = installedServer;
@@ -75,14 +76,17 @@ async function startBackendProcesses() {
       echoArgs = ['index.js'];
     } else {
       // Dev/unpacked fallback (e.g. running from dist/win-unpacked directly)
+      const ext = process.platform === 'win32' ? '.exe' : '';
       const devBinDir = path.resolve(path.join(process.resourcesPath, '../../../../build/bin'));
       const devOrchestratorDir = path.resolve(path.join(process.resourcesPath, '../../../../tools/orchestrator'));
       
-      serverPath = path.join(devBinDir, 'llama-server.exe');
+      serverPath = path.join(devBinDir, `llama-server${ext}`);
       serverCwd = devBinDir;
       
-      const compiledOrchestrator = path.join(devOrchestratorDir, 'dist/orchestrator.exe');
-      const devPython = path.resolve(path.join(process.resourcesPath, '../../../../.venv/Scripts/python.exe'));
+      const compiledOrchestrator = path.join(devOrchestratorDir, `dist/orchestrator${ext}`);
+      const devPython = process.platform === 'win32' 
+        ? path.resolve(path.join(process.resourcesPath, '../../../../.venv/Scripts/python.exe'))
+        : path.resolve(path.join(process.resourcesPath, '../../../../.venv/bin/python'));
       
       if (fs.existsSync(compiledOrchestrator)) {
         orchestratorPath = compiledOrchestrator;
@@ -103,11 +107,14 @@ async function startBackendProcesses() {
     }
   } else {
     // Development mode
+    const ext = process.platform === 'win32' ? '.exe' : '';
     const devBinDir = path.resolve(path.join(__dirname, '../../build/bin'));
     const devOrchestratorDir = path.resolve(path.join(__dirname, '../orchestrator'));
-    const devPython = path.resolve(path.join(__dirname, '../../.venv/Scripts/python.exe'));
+    const devPython = process.platform === 'win32'
+      ? path.resolve(path.join(__dirname, '../../.venv/Scripts/python.exe'))
+      : path.resolve(path.join(__dirname, '../../.venv/bin/python'));
 
-    serverPath = path.join(devBinDir, 'llama-server.exe');
+    serverPath = path.join(devBinDir, `llama-server${ext}`);
     serverCwd = devBinDir;
     
     orchestratorPath = devPython;
@@ -274,8 +281,9 @@ function createWindow() {
 ipcMain.handle('start-rpc-server', () => {
   if (rpcServerProcess) return { success: true, message: 'Already running' };
   
+  const ext = process.platform === 'win32' ? '.exe' : '';
   const devBinDir = path.resolve(path.join(__dirname, '../../build/bin'));
-  const rpcServerPath = path.join(devBinDir, 'rpc-server.exe');
+  const rpcServerPath = path.join(devBinDir, `rpc-server${ext}`);
   
   console.log(`Starting rpc-server from: ${rpcServerPath}`);
   rpcServerProcess = spawn(rpcServerPath, ['-p', '50052'], {

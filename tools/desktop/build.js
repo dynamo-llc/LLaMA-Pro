@@ -16,15 +16,16 @@ try {
   console.log('\n=== Step 2: Compiling Python Orchestrator with PyInstaller ===');
   // Copy providers.json and swarm_configs.json if they don't exist in dist
   const orchestratorDir = path.join(rootDir, 'tools/orchestrator');
-  runCommand('python -m PyInstaller --onefile --clean -n orchestrator main.py', orchestratorDir);
+  runCommand('python -m PyInstaller orchestrator.spec --clean -y', orchestratorDir);
 
   console.log('\n=== Step 3: Installing Electron Wrapper Dependencies ===');
   runCommand('npm install', __dirname);
 
   console.log('\n=== Step 4: Packaging Electron App ===');
-  runCommand('npm run build', __dirname);
+  const buildCommand = process.env.GH_TOKEN ? 'npm run build:publish' : 'npm run build';
+  runCommand(buildCommand, __dirname);
 
-  console.log('\n=== SUCCESS ===');
+  console.log('\n=== Build Complete ===');
   console.log(`Installer created successfully using electron-builder!`);
 } catch (error) {
   console.error('\n=== BUILD FAILED ===');

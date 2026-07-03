@@ -8,6 +8,8 @@ from threading import Thread
 
 logger = logging.getLogger(__name__)
 
+CACHE_FILE = os.path.join(os.path.dirname(__file__), "news_cache.json")
+
 class NewsManager:
     def __init__(self):
         self.news_cache = []
@@ -48,7 +50,27 @@ class NewsManager:
                 "is_internal": True
             }
         ]
+        self._load_cache()
         
+    def _load_cache(self):
+        if os.path.exists(CACHE_FILE):
+            try:
+                with open(CACHE_FILE, 'r') as f:
+                    cached_data = json.load(f)
+                    # Overwrite internal news to always have the latest internal ones, but keep external
+                    external_cached = [item for item in cached_data if not item.get('is_internal')]
+                    self.news_cache = self.internal_news + external_cached
+                    logger.info("Loaded news from disk cache.")
+            except Exception as e:
+                logger.error(f"Failed to load news cache: {e}")
+                
+    def _save_cache(self):
+        try:
+            with open(CACHE_FILE, 'w') as f:
+                json.dump(self.news_cache, f)
+        except Exception as e:
+            logger.error(f"Failed to save news cache: {e}")
+
     def start_background_fetch(self):
         def loop():
             while True:
@@ -60,56 +82,46 @@ class NewsManager:
         
     def fetch_external_news(self):
         try:
-            logger.info("Fetching external news from r/LocalLLaMA...")
+            logger.info("Fetching external news from dev.to API...")
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LLaMA-Pro/1.0"}
-            response = requests.get("https://www.reddit.com/r/LocalLLaMA/top.json?t=day&limit=15", headers=headers, timeout=10)
+            response = requests.get("https://dev.to/api/articles?tag=ai&top=1", headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 external_news = []
-                for post in data.get("data", {}).get("children", []):
-                    post_data = post.get("data", {})
-                    # We only want posts with text (selftext) or a thumbnail/preview to show as news
-                    title = post_data.get("title", "")
-                    selftext = post_data.get("selftext", "")
-                    url = "https://reddit.com" + post_data.get("permalink", "")
+                for idx, post in enumerate(data[:15]): # Limit to top 15
+                    title = post.get("title", "")
+                    description = post.get("description", "")
+                    url = post.get("url", "")
                     
-                    # Try to get an image
-                    image_url = None
-                    if post_data.get("thumbnail") and post_data.get("thumbnail").startswith("http"):
-                        image_url = post_data.get("thumbnail")
-                    elif post_data.get("preview") and "images" in post_data.get("preview"):
-                        try:
-                            image_url = post_data["preview"]["images"][0]["source"]["url"].replace("&amp;", "&")
-                        except:
-                            pass
-                            
+                    # Try to get an image, fallback to default patterns
+                    image_url = post.get("cover_image") or post.get("social_image")
+                    
                     # Some posts might just be links, fallback to external url
-                    if not selftext and not image_url:
-                        continue # Skip entirely boring posts
+                    if not description and not image_url:
+                        continue
                         
-                    # Truncate summary
-                    summary = selftext[:200] + "..." if len(selftext) > 200 else selftext
+                    summary = description[:200] + "..." if len(description) > 200 else description
                     if not summary:
                         summary = "Link/Image post."
                         
                     external_news.append({
-                        "id": post_data.get("id"),
+                        "id": str(post.get("id", idx)),
                         "title": title,
                         "summary": summary,
-                        "full_text": selftext,
+                        "full_text": f"{title}\n\n{description}\n\nRead more at the original source.",
                         "image_url": image_url,
-                        "source": "r/LocalLLaMA",
+                        "source": "Dev.to (AI)",
                         "url": url,
-                        "date": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(post_data.get("created_utc", time.time()))),
+                        "date": post.get("published_at", time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
                         "is_internal": False
                     })
                     
                 self.news_cache = self.internal_news + external_news
                 self.last_fetch = time.time()
+                self._save_cache()
                 logger.info(f"Successfully fetched {len(external_news)} external news items.")
             else:
                 logger.error(f"Failed to fetch news. Status: {response.status_code}")
-                # Fallback to internal only if empty
                 if not self.news_cache:
                     self.news_cache = self.internal_news
         except Exception as e:
@@ -118,7 +130,7 @@ class NewsManager:
                 self.news_cache = self.internal_news
                 
     def get_news(self):
-        if not self.news_cache:
+        if not self.news_cache or len(self.news_cache) == len(self.internal_news):
             self.fetch_external_news()
         return self.news_cache
 

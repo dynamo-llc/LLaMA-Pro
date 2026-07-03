@@ -11,6 +11,8 @@
 	import { PwaMetaTags, PwaRefreshAlert } from '$lib/components/pwa';
 	import { pwaAssetsHead } from 'virtual:pwa-assets/head';
 
+	import CompanionOverlay from '$lib/components/app/companion/CompanionOverlay.svelte';
+	import { companionStore } from '$lib/services/companion.svelte';
 	import { conversationsStore } from '$lib/stores/conversations.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { isRouterMode, serverStore } from '$lib/stores/server.svelte';
@@ -33,7 +35,7 @@
 	import { buildInfoStore } from '$lib/stores/build-info.svelte';
 
 	import { SETTINGS_KEYS } from '$lib/constants';
-	import { Files, Activity, Terminal, Settings } from '@lucide/svelte';
+	import { Files, Activity, Terminal, Settings, Rss, Bot } from '@lucide/svelte';
 	import McpLogo from '$lib/components/app/mcp/McpLogo.svelte';
 
 	if (browser && window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
@@ -361,6 +363,9 @@
 		if (routeId.startsWith('/mcp-servers')) {
 			return { title: 'MCP Servers', icon: McpLogo };
 		}
+		if (routeId.startsWith('/news')) {
+			return { title: 'News & Discoveries', icon: Rss };
+		}
 		if (routeId.startsWith('/models')) {
 			return { title: 'Model Management', icon: Files };
 		}
@@ -521,6 +526,21 @@
 		onCancel={handleTitleUpdateCancel}
 	/>
 </Tooltip.Provider>
+
+<CompanionOverlay />
+
+<!-- Floating J.A.R.V.I.S. Orb Toggle -->
+{#if !companionStore.isOpen}
+	<button 
+		class="fixed bottom-4 right-4 z-[9900] group flex items-center justify-center w-14 h-14 rounded-full bg-black hover:bg-black/80 border border-primary/30 shadow-[0_0_20px_rgba(0,210,255,0.2)] hover:shadow-[0_0_30px_rgba(0,210,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95"
+		onclick={() => companionStore.open()}
+		aria-label="Summon Companion"
+	>
+		<div class="absolute inset-0 rounded-full bg-primary/20 blur-md group-hover:bg-primary/40 transition-colors"></div>
+		<div class="absolute inset-0 rounded-full bg-gradient-to-br from-white/20 to-transparent"></div>
+		<Bot class="w-6 h-6 text-primary relative z-10 animate-pulse" style="animation-duration: 3s;" />
+	</button>
+{/if}
 
 <!-- PWA update prompt + version -->
 <div class="fixed right-4 bottom-4 z-9999 flex flex-col items-end gap-1">

@@ -26,7 +26,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
-from ui.graph import create_ui_graph
+
 
 from tunnel import TunnelManager, get_local_ip
 from news import news_manager
@@ -44,18 +44,28 @@ def get_local_network_ip():
     # The frontend knows the port (usually 8000), but we can just return the IP
     return {"ip": ip}
 
+def get_app_data_dir():
+	if sys.platform == "win32":
+		return os.environ.get("APPDATA", os.path.expanduser("~\\AppData\\Roaming"))
+	elif sys.platform == "darwin":
+		return os.path.expanduser("~/Library/Application Support")
+	else:
+		return os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+
 def get_base_paths():
+	app_data = get_app_data_dir()
+	config_dir = os.path.join(app_data, 'LLaMA Pro')
+	os.makedirs(config_dir, exist_ok=True)
+	providers_file = os.path.join(config_dir, "providers.json")
+	swarm_config_file = os.path.join(config_dir, "swarm_configs.json")
+
 	if getattr(sys, 'frozen', False):
 		exe_dir = os.path.dirname(sys.executable)
 		base_dir = os.path.abspath(os.path.join(exe_dir, ".."))
-		providers_file = os.path.join(exe_dir, "providers.json")
-		swarm_config_file = os.path.join(exe_dir, "swarm_configs.json")
 		rpc_path = os.path.join(exe_dir, "rpc-server.exe")
 	else:
 		script_dir = os.path.dirname(__file__)
 		base_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
-		providers_file = os.path.join(script_dir, "providers.json")
-		swarm_config_file = os.path.join(script_dir, "swarm_configs.json")
 		rpc_path = os.path.abspath(os.path.join(script_dir, "..", "..", "build", "bin", "rpc-server.exe"))
 		if not os.path.exists(rpc_path):
 			rpc_path = os.path.abspath(os.path.join(script_dir, "..", "..", "build", "bin", "Release", "rpc-server.exe"))
@@ -219,71 +229,13 @@ def monitor_and_restart(cfg):
 def start_local_mcp_servers():
     base_dir = BASE_DIR
     
-    mcp_configs = [
-        {
-            "name": "DuckDuckGo News", 
-            "port": 8004, 
-            "cmd": ["node", "index.js"],
-            "cwd": os.path.join(base_dir, "tools", "mcp", "duckduckgo-news")
-        },
-        {
-            "name": "Puppeteer Browser", 
-            "port": 8006, 
-            "cmd": ["node", "index.js"],
-            "cwd": os.path.join(base_dir, "tools", "mcp", "puppeteer-browser")
-        },
-        {
-            "name": "Filesystem", 
-            "port": 8003, 
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8003", "--stdio", "npx -y @modelcontextprotocol/server-filesystem C:\\Users\\MONSTER\\Desktop", "--cors"]
-        },
-        {
-            "name": "Fetch Web Page", 
-            "port": 8005, 
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8005", "--stdio", "npx -y mcp-fetch-server", "--cors"]
-        },
-        {
-            "name": "Playwright", 
-            "port": 8015, 
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8015", "--stdio", "npx -y @playwright/mcp", "--cors"]
-        },
-        {
-            "name": "Memory", 
-            "port": 8021, 
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8021", "--stdio", "npx -y @modelcontextprotocol/server-memory", "--cors"]
-        },
-        {
-            "name": "Ghidra (Headless)", 
-            "port": 8081, 
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8081", "--stdio", "C:\\Users\\MONSTER\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe E:\\GHIDRA\\bridge_mcp_ghidra_headless.py", "--cors"]
-        },
-        {
-            "name": "IDA Pro", 
-            "port": 8082, 
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8082", "--stdio", "C:\\Users\\MONSTER\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe E:\\PROJECTS\\EZLLM\\server\\bridges\\bridge_mcp_ida.py --ida-server http://127.0.0.1:8081/", "--cors"]
-        },
-        {
-            "name": "SQLite Database",
-            "port": 8030,
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8030", "--stdio", "npx -y mcp-server-sqlite --db C:\\Users\\MONSTER\\Desktop\\llama_mcp.db", "--cors"]
-        },
-        {
-            "name": "Chrome DevTools",
-            "port": 8019,
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8019", "--stdio", "npx -y chrome-devtools-mcp --autoConnect", "--cors"]
-        },
-        {
-            "name": "PostgreSQL",
-            "port": 8023,
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8023", "--stdio", "npx -y @modelcontextprotocol/server-postgres postgresql://postgres:postgres@localhost:5432/postgres", "--cors"]
-        },
-
-        {
-            "name": "GitHub",
-            "port": 8017,
-            "cmd": ["npx.cmd", "-y", "supergateway", "--port", "8017", "--stdio", "npx -y @modelcontextprotocol/server-github", "--cors"]
-        }
-    ]
+    config_path = os.path.join(base_dir, "tools", "orchestrator", "mcp_configs.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            mcp_configs = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load MCP configs from {config_path}: {e}")
+        mcp_configs = []
     
     for cfg in mcp_configs:
         t = threading.Thread(target=monitor_and_restart, args=(cfg,), daemon=True)
@@ -492,6 +444,46 @@ async def startup_event():
 async def get_news():
     return JSONResponse(content=news_manager.get_news())
 
+@app.get("/api/mcp")
+def get_mcps():
+    config_path = os.path.join(BASE_DIR, "tools", "orchestrator", "mcp_configs.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load MCP configs: {e}")
+        return []
+
+@app.post("/api/mcp")
+async def add_mcp(request: Request):
+    try:
+        data = await request.json()
+        config_path = os.path.join(BASE_DIR, "tools", "orchestrator", "mcp_configs.json")
+        configs = []
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                configs = json.load(f)
+        
+        configs.append(data)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(configs, f, indent=4)
+        
+        # Start the new MCP immediately
+        t = threading.Thread(target=monitor_and_restart, args=(data,), daemon=True)
+        t.start()
+        
+        return {"status": "success", "message": f"MCP {data.get('name')} installed and started."}
+    except Exception as e:
+        logger.error(f"Failed to add MCP: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/mcp/{port}/toggle")
+async def toggle_mcp(port: int, request: Request):
+    # This is a stub for the toggle endpoint.
+    # In a full implementation, we would track the process by port in mcp_processes
+    # and either terminate it or restart it.
+    return {"status": "success", "message": f"Toggled MCP on port {port}"}
+
 @app.post("/api/news/refresh")
 async def refresh_news():
     return JSONResponse(content=news_manager.force_refresh())
@@ -545,7 +537,7 @@ DEFAULT_NODES = [
     {
         "id": "node-3",
         "role": "synthesizer",
-        "url": os.getenv("BIG_MODEL_URL", "http://192.168.1.100:8080/v1"),
+        "url": os.getenv("BIG_MODEL_URL", "http://127.0.0.1:8080/v1"),
         "model_name": os.getenv("BIG_MODEL_NAME", "big-model"),
         "temperature": 0.1,
         "persona": "You are the Arbiter Judge. Your job is to read the original conversation and synthesize the proposals into a single cohesive answer.",
@@ -1149,12 +1141,13 @@ async def proxy_models(request: Request, path: str):
         try:
             body_json = json.loads(body.decode("utf-8"))
             model_id = body_json.get("model", "")
-            if ":" in model_id and model_id in loaded_external_models:
+            if model_id in loaded_external_models:
                 del loaded_external_models[model_id]
                 return JSONResponse({"status": "success", "message": "Model unloaded virtually"})
         except:
             pass
 
+    # Generic proxy for other /models/ requests
     headers = dict(request.headers)
     headers.pop("host", None)
     headers.pop("content-length", None)
@@ -1176,6 +1169,46 @@ async def proxy_models(request: Request, path: str):
                 return Response(content=response.content, status_code=response.status_code)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.post("/api/models/load")
+async def api_load_model(request: Request):
+    try:
+        body = await request.json()
+        model_id = body.get("model", "")
+        if ":" in model_id:
+            p_id, m_id = model_id.split(":", 1)
+            if p_id in providers_state:
+                loaded_external_models[model_id] = {
+                    "id": model_id,
+                    "object": "model",
+                    "status": {"value": "loaded"}
+                }
+                return {"status": "success", "message": "Model loaded virtually"}
+        return JSONResponse({"error": "Invalid API model or provider not configured"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+@app.post("/api/models/unload")
+async def api_unload_model(request: Request):
+    try:
+        body = await request.json()
+        model_id = body.get("model", "")
+        if model_id in loaded_external_models:
+            del loaded_external_models[model_id]
+            return {"status": "success", "message": "Model unloaded virtually"}
+        return JSONResponse({"error": "Model not found or not an API model"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+@app.get("/api/models/sse")
+async def api_models_sse(request: Request):
+    # Simple event stream that keeps alive, not currently needed for virtual models since they load instantly, 
+    # but good for preventing 404s if UI hits it directly.
+    async def stream_generator():
+        yield b"data: {\"event\": \"keepalive\"}\n\n"
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+# Add Tunnel Management API
 
 @app.post("/v1/swarm/chat/completions")
 @app.post("/v1/chat/completions")
@@ -1267,6 +1300,8 @@ async def chat_completions(request: Request):
                 for choice in data.get("choices", []):
                     msg = choice.get("message", {})
                     content = msg.get("content", "")
+                    if content is None:
+                        content = ""
                     
                     # Try to parse raw JSON first
                     parsed_tool = None
@@ -1311,6 +1346,8 @@ async def chat_completions(request: Request):
     for msg in body.get("messages", []):
         role = msg.get("role")
         content = msg.get("content")
+        if content is None:
+            content = ""
         if role == "user":
             lc_messages.append(HumanMessage(content=content))
         elif role == "system":
@@ -1327,12 +1364,11 @@ async def chat_completions(request: Request):
         "iterations": 0
     }
     
-    # Run the graph
-    result = await orchestrator_app.ainvoke(state)
-    final_text = result["final_answer"]
-    
     # If not streaming, return the full JSON response
     if not is_stream:
+        # Run the graph once
+        result = await orchestrator_app.ainvoke(state)
+        final_text = result["final_answer"]
         return JSONResponse({
             "id": "chatcmpl-biglittle",
             "object": "chat.completion",
@@ -1354,32 +1390,37 @@ async def chat_completions(request: Request):
         # Yield the initial role
         yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {'role': 'assistant'}}]})}\n\n"
         
-        async for event in orchestrator_app.astream(state, stream_mode="updates"):
-            for node_name, node_data in event.items():
-                if node_name == "generate":
-                    # The generate node finished. Let's output the debate as a markdown block.
-                    proposals = node_data["proposals"]
-                    iteration = node_data.get("iterations", 0)
-                    
-                    header = f"\n\n> ### 🧠 BIG-LITTLE Debate (Round {iteration + 1})\n"
-                    p_text = header
-                    for idx, p in enumerate(proposals):
-                        p_text += f"> **Agent {idx + 1}:** {p}\n\n"
-                    p_text += "---\n\n"
-                    
-                    chunk_size = 50
-                    for i in range(0, len(p_text), chunk_size):
-                        chunk = p_text[i:i+chunk_size]
-                        yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {'content': chunk}}]})}\n\n"
-                        await asyncio.sleep(0.01)
+        try:
+            async for event in orchestrator_app.astream(state, stream_mode="updates"):
+                for node_name, node_data in event.items():
+                    if node_name == "generate":
+                        # The generate node finished. Let's output the debate as a markdown block.
+                        proposals = node_data["proposals"]
+                        iteration = node_data.get("iterations", 0)
                         
-                elif node_name == "judge":
-                    final_ans = node_data["final_answer"]
-                    chunk_size = 20
-                    for i in range(0, len(final_ans), chunk_size):
-                        chunk = final_ans[i:i+chunk_size]
-                        yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {'content': chunk}}]})}\n\n"
-                        await asyncio.sleep(0.01)
+                        header = f"\n\n> ### 🧠 BIG-LITTLE Debate (Round {iteration + 1})\n"
+                        p_text = header
+                        for idx, p in enumerate(proposals):
+                            p_text += f"> **Agent {idx + 1}:** {p}\n\n"
+                        p_text += "---\n\n"
+                        
+                        chunk_size = 50
+                        for i in range(0, len(p_text), chunk_size):
+                            chunk = p_text[i:i+chunk_size]
+                            yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {'content': chunk}}]})}\n\n"
+                            await asyncio.sleep(0.01)
+                            
+                    elif node_name == "judge":
+                        final_ans = node_data["final_answer"]
+                        chunk_size = 20
+                        for i in range(0, len(final_ans), chunk_size):
+                            chunk = final_ans[i:i+chunk_size]
+                            yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {'content': chunk}}]})}\n\n"
+                            await asyncio.sleep(0.01)
+        except Exception as e:
+            logger.error(f"Swarm streaming error: {e}")
+            error_msg = str(e).replace('"', "'").replace("\n", " ")
+            yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {'content': f'\\n\\n[SWARM ERROR: {error_msg}]'}}]})}\n\n"
             
         # Yield the final stop sequence
         yield f"data: {json.dumps({'id': 'chatcmpl-biglittle', 'object': 'chat.completion.chunk', 'choices': [{'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
@@ -1405,6 +1446,42 @@ async def start_tunnel():
         return JSONResponse({"error": "Failed to get tunnel URL"}, status_code=500)
     except Exception as e:
         logger.error(f"Error starting tunnel: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str
+
+tts_models_cache = {}
+
+@app.post("/v1/tts")
+async def text_to_speech(req: TTSRequest):
+    try:
+        from piper import PiperVoice
+        import wave
+        import io
+        
+        model_name = req.voice
+        if not model_name.endswith(".onnx"):
+            model_name += ".onnx"
+            
+        model_path = os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models", model_name)
+        if not os.path.exists(model_path):
+            model_path = os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models", "en_GB-alan-medium.onnx")
+            
+        if model_path not in tts_models_cache:
+            tts_models_cache[model_path] = PiperVoice.load(model_path, model_path + ".json")
+            
+        voice = tts_models_cache[model_path]
+        
+        wav_io = io.BytesIO()
+        with wave.open(wav_io, 'wb') as wav_file:
+            voice.synthesize(req.text, wav_file)
+            
+        wav_io.seek(0)
+        return StreamingResponse(wav_io, media_type="audio/wav")
+    except Exception as e:
+        logger.error(f"TTS Error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/tunnel/stop")

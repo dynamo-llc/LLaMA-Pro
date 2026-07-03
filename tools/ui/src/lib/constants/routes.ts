@@ -36,5 +36,7 @@ export const ROUTES = {
 	/** Search — mobile-only full-page conversation search. */
 	SEARCH: '#/search',
 	/** News Portal */
-	NEWS: '#/news'
+	NEWS: '#/news',
+	/** Companion / Jarvis AI */
+	COMPANION: '#/companion'
 } as const;

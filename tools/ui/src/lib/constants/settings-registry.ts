@@ -46,7 +46,7 @@ export const SETTINGS_SECTION_TITLES = {
 	DEVELOPER: 'Developer',
 	ECHO: 'Echo Alignment',
 	MESH: 'Mesh Network',
-	TUNNEL: 'Tunnel'
+	TUNNEL: 'Edge Devices'
 } as const;
 
 const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Component }[] = [
