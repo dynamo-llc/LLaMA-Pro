@@ -1764,11 +1764,18 @@
 				</h4>
 
 				{#if loadingOnlineModels}
-					<div
-						class="py-12 flex flex-col items-center justify-center text-muted-foreground border border-dashed border-border/30 rounded-lg"
-					>
-						<Loader2 class="h-8 w-8 animate-spin mb-4 text-primary" />
-						<p>Fetching live online models from providers...</p>
+					<div class="grid gap-3">
+						{#each Array(3) as _}
+							<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border border-border/30 rounded-xl p-4 bg-muted/10 animate-pulse">
+								<div class="flex-1 min-w-0 flex flex-col gap-2">
+									<div class="flex items-center gap-2">
+										<div class="h-5 bg-muted w-16 rounded-full"></div>
+										<div class="h-4 bg-muted w-32 rounded"></div>
+									</div>
+								</div>
+								<div class="h-9 bg-muted w-24 rounded-md"></div>
+							</div>
+						{/each}
 					</div>
 				{:else if onlineModels.length === 0}
 					<div
@@ -2061,9 +2068,26 @@
 
 				<!-- Trending Models List -->
 				{#if loadingTrending}
-					<div class="py-20 flex flex-col items-center justify-center gap-3">
-						<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
-						<span class="text-sm text-muted-foreground">Fetching models from Hugging Face...</span>
+					<div class="grid gap-3">
+						{#each Array(5) as _}
+							<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border border-border/30 rounded-xl p-4 bg-muted/10 animate-pulse">
+								<div class="flex-1 min-w-0 flex flex-col gap-3">
+									<div class="flex items-center gap-3">
+										<div class="h-5 bg-muted w-40 rounded"></div>
+										<div class="h-4 bg-muted w-12 rounded"></div>
+										<div class="h-4 bg-muted w-16 rounded"></div>
+									</div>
+									<div class="flex items-center gap-2">
+										<div class="h-5 bg-muted w-16 rounded-full"></div>
+										<div class="h-5 bg-muted w-20 rounded-full"></div>
+										<div class="h-5 bg-muted w-14 rounded-full"></div>
+									</div>
+								</div>
+								<div class="flex items-center gap-3 mt-3 md:mt-0">
+									<div class="h-9 bg-muted w-24 rounded-md"></div>
+								</div>
+							</div>
+						{/each}
 					</div>
 				{:else if displayedTrendingModels.length === 0}
 					<div class="py-16 text-center text-sm text-muted-foreground">

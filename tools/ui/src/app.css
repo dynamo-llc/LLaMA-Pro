@@ -486,7 +486,7 @@
 @layer base {
 	* {
 		@apply border-border outline-ring/50;
-		transition-property: background-color, border-color, color, fill, stroke, box-shadow, text-shadow;
+		transition-property: background-color, border-color, color, fill, stroke, box-shadow, text-shadow, transform;
 		transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 		transition-duration: 300ms;
 	}
@@ -495,6 +495,10 @@
 		@apply bg-background text-foreground;
 		scrollbar-width: thin;
 		scrollbar-gutter: stable;
+		background-image: 
+			radial-gradient(circle at 15% 0%, color-mix(in oklch, var(--primary) 8%, transparent), transparent 40%),
+			radial-gradient(circle at 85% 100%, color-mix(in oklch, var(--secondary) 5%, transparent), transparent 40%);
+		background-attachment: fixed;
 	}
 
 	/* Global scrollbar styling - visible only on hover */

@@ -93,11 +93,25 @@
 		<p class="text-muted-foreground mb-8 text-lg">Stay updated with the latest in open weights AI and explore new capabilities.</p>
 		
 		{#if loading}
-			<div class="grid place-items-center h-64">
-				<div class="animate-pulse flex flex-col items-center gap-4">
-					<div class="h-10 w-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-					<p class="text-muted-foreground">Scanning the neural net...</p>
-				</div>
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				{#each Array(6) as _}
+					<div class="bg-card/40 border border-border/50 rounded-2xl overflow-hidden h-[360px] animate-pulse flex flex-col">
+						<div class="h-48 w-full bg-muted/60"></div>
+						<div class="p-5 flex flex-col flex-1 gap-4">
+							<div class="flex items-center gap-2">
+								<div class="h-3 bg-muted w-20 rounded"></div>
+								<div class="h-3 bg-muted w-24 rounded"></div>
+							</div>
+							<div class="h-6 bg-muted w-full rounded"></div>
+							<div class="h-6 bg-muted w-4/5 rounded"></div>
+							
+							<div class="mt-auto flex flex-col gap-2">
+								<div class="h-3 bg-muted w-full rounded"></div>
+								<div class="h-3 bg-muted w-2/3 rounded"></div>
+							</div>
+						</div>
+					</div>
+				{/each}
 			</div>
 		{:else if error}
 			<div class="bg-destructive/10 text-destructive p-4 rounded-xl border border-destructive/20 text-center">

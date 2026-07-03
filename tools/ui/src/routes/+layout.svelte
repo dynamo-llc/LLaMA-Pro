@@ -19,6 +19,7 @@
 	import { ROUTES } from '$lib/constants/routes';
 	import { RouterService } from '$lib/services/router.service';
 	import { Toaster } from 'svelte-sonner';
+	import { fade } from 'svelte/transition';
 	import { modelsStore } from '$lib/stores/models.svelte';
 	import { mcpStore } from '$lib/stores/mcp.svelte';
 	import { TOOLTIP_DELAY_DURATION } from '$lib/constants';
@@ -494,8 +495,16 @@
 			</div>
 
 			<!-- Main Page Content -->
-			<div class="flex-1 overflow-y-auto min-h-0 main-content-scroll">
-				{@render children?.()}
+			<div class="flex-1 min-h-0 main-content-scroll grid relative">
+				{#key page.url.hash.split('?')[0] || 'home'}
+					<div 
+						class="col-start-1 row-start-1 w-full h-full overflow-y-auto"
+						in:fade={{ duration: 150, delay: 150 }} 
+						out:fade={{ duration: 150 }}
+					>
+						{@render children?.()}
+					</div>
+				{/key}
 			</div>
 		</div>
 	</div>
