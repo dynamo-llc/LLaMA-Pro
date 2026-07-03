@@ -3,7 +3,7 @@
     import { Switch } from '$lib/components/ui/switch';
     import { onMount } from 'svelte';
     import QRCode from 'qrcode';
-    import { ExternalLink, Copy, Wifi } from 'lucide-svelte';
+    import { ExternalLink, Copy, Wifi } from '@lucide/svelte';
     import { Button } from '$lib/components/ui/button';
 
     let isEnabled = $state(false);
@@ -12,8 +12,8 @@
     let localUrl = $state<string | null>(null);
     let error = $state<string | null>(null);
     
-    let publicCanvas: HTMLCanvasElement;
-    let localCanvas: HTMLCanvasElement;
+    let publicCanvas = $state<HTMLCanvasElement>();
+    let localCanvas = $state<HTMLCanvasElement>();
 
     // Helper to get a nice color from CSS variables (e.g. primary color) or fallback
     function getThemeColors() {

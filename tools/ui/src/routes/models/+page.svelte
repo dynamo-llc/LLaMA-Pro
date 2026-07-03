@@ -36,7 +36,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { serverStore } from '$lib/stores/server.svelte';
 	import { modelsStore } from '$lib/stores/models.svelte';
-	import { getAuthHeaders } from '$lib/utils';
+	import { getAuthHeaders } from '$lib/utils/api-headers';
 	import { ServerModelStatus } from '$lib/enums';
 	import { ActionIconCopyToClipboard, MarkdownContent, RpcDialog } from '$lib/components/app';
 
