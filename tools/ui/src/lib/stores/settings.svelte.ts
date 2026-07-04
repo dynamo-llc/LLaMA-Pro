@@ -58,15 +58,15 @@ export function applyThemeMode(themeValue: ColorMode) {
 
 	if (themeValue === ColorMode.CYBERPUNK) {
 		document.documentElement.classList.add('cyberpunk');
-		setMode('dark' as ColorMode);
+		setMode('dark');
 	} else if (themeValue === ColorMode.RAINBOW) {
 		document.documentElement.classList.add('rainbow');
-		setMode('light' as ColorMode);
+		setMode('light');
 	} else if (themeValue === ColorMode.NEON_CITY) {
 		document.documentElement.classList.add('neon-city');
-		setMode('dark' as ColorMode);
+		setMode('dark');
 	} else {
-		setMode(themeValue as ColorMode);
+		setMode(themeValue as "system" | "light" | "dark");
 	}
 }
 

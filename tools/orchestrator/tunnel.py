@@ -42,14 +42,20 @@ class TunnelManager:
             if platform.system() == "Windows":
                 url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
             elif platform.system() == "Darwin":
-                if platform.machine() == "arm64":
-                    url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64" # wait, darwin-arm64
-                else:
-                    url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64"
+                url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz"
             else:
                 url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
                 
-            urllib.request.urlretrieve(url, self.exe_path)
+            if url.endswith(".tgz"):
+                import tarfile
+                tgz_path = self.exe_path + ".tgz"
+                urllib.request.urlretrieve(url, tgz_path)
+                with tarfile.open(tgz_path, "r:gz") as tar:
+                    tar.extractall(path=self.bin_dir)
+                os.remove(tgz_path)
+            else:
+                urllib.request.urlretrieve(url, self.exe_path)
+            
             if platform.system() != "Windows":
                 os.chmod(self.exe_path, 0o755)
             logger.info("Download complete.")

@@ -172,53 +172,79 @@ class CompanionState {
         await this.streamLLMResponse();
     }
 
-    private async speak(text: string) {
-        if (!text) return;
-        
-        try {
-            const isDesktop = window.location.protocol === 'app:';
-            const host = (isDesktop || !window.location.hostname || window.location.hostname === '') ? '127.0.0.1' : window.location.hostname;
-            const orchestratorPort = (window as any).orchestratorPort || '8000';
-            const endpoint = `http://${host}:${orchestratorPort}/v1/tts`;
+    private audioQueue: string[] = [];
+    private isPlayingAudio = false;
 
-            const res = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: text,
-                    voice: this.selectedVoiceURI || 'en_GB-alan-medium'
-                })
-            });
+    private async processAudioQueue() {
+        if (this.isPlayingAudio || this.audioQueue.length === 0) return;
+        this.isPlayingAudio = true;
 
-            if (!res.ok) throw new Error("TTS failed");
-            
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            
-            if (this.activeAudio) {
-                this.activeAudio.pause();
-                this.activeAudio = null;
-            }
-            
-            this.activeAudio = new Audio(url);
-            await this.activeAudio.play();
-        } catch (e) {
-            console.error("TTS Error", e);
-            
-            // Fallback to web speech if local backend fails
-            if (window.speechSynthesis) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(text);
-                const voices = window.speechSynthesis.getVoices();
-                const isUS = this.selectedVoiceURI?.includes('en_US');
-                let fallbackVoice = voices.find(v => 
-                    isUS ? (v.name.includes('US') || v.name.includes('United States') || v.lang === 'en-US')
-                         : (v.name.includes('Google UK English Male') || v.name.includes('Great Britain') || v.lang === 'en-GB')
-                );
-                if (fallbackVoice) utterance.voice = fallbackVoice;
-                window.speechSynthesis.speak(utterance);
-            }
+        while (this.audioQueue.length > 0) {
+            const text = this.audioQueue.shift();
+            if (!text) continue;
+            await this.speakTextInternal(text);
         }
+        this.isPlayingAudio = false;
+    }
+
+    private speak(text: string) {
+        if (!text.trim()) return;
+        this.audioQueue.push(text);
+        this.processAudioQueue();
+    }
+
+    private async speakTextInternal(text: string): Promise<void> {
+        return new Promise<void>(async (resolve) => {
+            try {
+                const isDesktop = window.location.protocol === 'app:';
+                const host = (isDesktop || !window.location.hostname || window.location.hostname === '') ? '127.0.0.1' : window.location.hostname;
+                const orchestratorPort = (window as any).orchestratorPort || '8000';
+                const endpoint = `http://${host}:${orchestratorPort}/v1/tts`;
+
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        voice: this.selectedVoiceURI || 'en_GB-alan-medium'
+                    })
+                });
+
+                if (!res.ok) throw new Error("TTS failed");
+                
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                
+                if (this.activeAudio) {
+                    this.activeAudio.pause();
+                }
+                
+                this.activeAudio = new Audio(url);
+                this.activeAudio.onended = () => resolve();
+                this.activeAudio.onerror = () => resolve();
+                await this.activeAudio.play();
+            } catch (e) {
+                console.error("TTS Error", e);
+                
+                // Fallback to web speech if local backend fails
+                if (window.speechSynthesis) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    const voices = window.speechSynthesis.getVoices();
+                    const isUS = this.selectedVoiceURI?.includes('en_US');
+                    let fallbackVoice = voices.find(v => 
+                        isUS ? (v.name.includes('US') || v.name.includes('United States') || v.lang === 'en-US')
+                             : (v.name.includes('Google UK English Male') || v.name.includes('Great Britain') || v.lang === 'en-GB')
+                    );
+                    if (fallbackVoice) utterance.voice = fallbackVoice;
+                    utterance.onend = () => resolve();
+                    utterance.onerror = () => resolve();
+                    window.speechSynthesis.speak(utterance);
+                } else {
+                    resolve();
+                }
+            }
+        });
     }
 
     private async streamLLMResponse(depth = 0) {
@@ -256,9 +282,9 @@ class CompanionState {
             }
 
             const payload = {
-                model: activeModel, // use active model
+                model: activeModel,
                 messages: this.messages,
-                stream: false, // We'll do non-streaming for simplicity of tool parsing first
+                stream: true,
                 tools: TOOLS,
                 tool_choice: "auto"
             };
@@ -281,30 +307,83 @@ class CompanionState {
                 throw new Error(errMsg);
             }
 
-            const data = await res.json();
-            const choice = data.choices[0];
-            const message = choice.message;
+            const reader = res.body?.getReader();
+            const decoder = new TextDecoder("utf-8");
 
-            this.messages.push(message);
+            let fullContent = "";
+            let currentSentence = "";
+            let isToolCall = false;
+            let toolCallName = "";
+            let toolCallArgs = "";
+            let toolCallId = "";
+            let buffer = "";
 
-            if (message.content) {
-                this.activeResponse = message.content;
-                this.speak(message.content);
+            this.activeResponse = "";
+
+            while (reader) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                buffer += chunk;
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith("data: ") && trimmedLine !== "data: [DONE]") {
+                        try {
+                            const data = JSON.parse(trimmedLine.substring(6));
+                            const delta = data.choices[0].delta;
+                            
+                            if (delta.tool_calls) {
+                                isToolCall = true;
+                                if (delta.tool_calls[0].id) toolCallId = delta.tool_calls[0].id;
+                                if (delta.tool_calls[0].function?.name) toolCallName += delta.tool_calls[0].function.name;
+                                if (delta.tool_calls[0].function?.arguments) toolCallArgs += delta.tool_calls[0].function.arguments;
+                            }
+                            
+                            if (delta.content) {
+                                fullContent += delta.content;
+                                currentSentence += delta.content;
+                                this.activeResponse = fullContent;
+                                
+                                if (currentSentence.match(/[.!?]\s/)) {
+                                    this.speak(currentSentence);
+                                    currentSentence = "";
+                                }
+                            }
+                        } catch (e) {
+                            // ignore incomplete chunks
+                        }
+                    }
+                }
             }
 
-            // Handle Tool Calls
-            if (choice.finish_reason === "tool_calls" || message.tool_calls) {
-                for (const toolCall of (message.tool_calls || [])) {
-                    const result = await this.executeTool(toolCall);
-                    this.messages.push({
-                        role: 'tool',
-                        tool_call_id: toolCall.id,
-                        name: toolCall.function.name,
-                        content: JSON.stringify(result)
-                    });
-                }
+            if (currentSentence.trim()) {
+                this.speak(currentSentence);
+            }
+
+            if (fullContent) {
+                this.messages.push({ role: 'assistant', content: fullContent });
+            } else if (isToolCall) {
+                this.messages.push({
+                    role: 'assistant',
+                    content: "",
+                    tool_calls: [{
+                        id: toolCallId,
+                        type: "function",
+                        function: { name: toolCallName, arguments: toolCallArgs }
+                    }]
+                });
                 
-                // Recursively call LLM to summarize tool execution
+                const result = await this.executeTool({ function: { name: toolCallName, arguments: toolCallArgs }});
+                this.messages.push({
+                    role: 'tool',
+                    tool_call_id: toolCallId,
+                    name: toolCallName,
+                    content: JSON.stringify(result)
+                });
                 await this.streamLLMResponse(depth + 1);
             }
 

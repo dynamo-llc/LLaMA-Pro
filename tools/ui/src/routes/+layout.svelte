@@ -239,7 +239,7 @@
 				});
 			}
 			if (window.electronAPI.onUpdateError) {
-				window.electronAPI.onUpdateError((error) => {
+				window.electronAPI.onUpdateError((error: any) => {
 					import('svelte-sonner').then(({ toast }) => {
 						toast.error('Update failed', {
 							description: 'Could not download the latest update. Check your connection.',

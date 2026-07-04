@@ -131,7 +131,7 @@
 			let port = window.llamaPort || window.location.port || '8080';
 			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:${port}`;
 		}
-		return `http://localhost:${window.llamaPort || '8080'}`;
+		return `http://localhost:8080`;
 	});
 
 	const orchestratorHost = $derived.by(() => {
@@ -143,7 +143,7 @@
 			let port = window.orchestratorPort || '8000';
 			return `${window.location.protocol === 'app:' ? 'http:' : window.location.protocol}//${host}:${port}`;
 		}
-		return `http://localhost:${window.orchestratorPort || '8000'}`;
+		return `http://localhost:8000`;
 	});
 
 	const loadedSlots = $derived.by(() => {

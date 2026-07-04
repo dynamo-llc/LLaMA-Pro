@@ -920,7 +920,7 @@ class ModelsStore {
 						id: modelId,
 						object: 'model',
 						status: { value: ServerModelStatus.LOADED }
-					} as ApiRouterModel;
+					} as ApiRouterModelMeta;
 					this.routerModels = [...this.routerModels, model];
 				} else {
 					this.setRouterModelStatus(modelId, ServerModelStatus.LOADED);

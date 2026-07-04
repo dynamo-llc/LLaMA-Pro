@@ -1881,7 +1881,7 @@ void server_models_routes::init_routes() {
             } else {
                 std::string name_lower = name;
                 std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-                if (string_ends_with(name_lower, ".gguf")) {
+                if (string_ends_with(name_lower, ".gguf") && name.find('/') == std::string::npos && name.find('\\') == std::string::npos) {
                     std::error_code ec;
                     if (std::filesystem::exists(name, ec) && std::filesystem::is_regular_file(name, ec)) {
                         server_model_meta new_meta;
@@ -2161,10 +2161,16 @@ void server_models_routes::init_routes() {
         }
         
 #ifdef _WIN32
-        _putenv_s("LLAMA_CACHE", dir.c_str());
-        _putenv_s("HF_HUB_CACHE", dir.c_str());
-        _putenv_s("HUGGINGFACE_HUB_CACHE", dir.c_str());
-        _putenv_s("HF_HOME", dir.c_str());
+        std::wstring wdir;
+        int len = MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, NULL, 0);
+        if (len > 0) {
+            wdir.resize(len);
+            MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, &wdir[0], len);
+            _wputenv_s(L"LLAMA_CACHE", wdir.c_str());
+            _wputenv_s(L"HF_HUB_CACHE", wdir.c_str());
+            _wputenv_s(L"HUGGINGFACE_HUB_CACHE", wdir.c_str());
+            _wputenv_s(L"HF_HOME", wdir.c_str());
+        }
 #else
         setenv("LLAMA_CACHE", dir.c_str(), 1);
         setenv("HF_HUB_CACHE", dir.c_str(), 1);
@@ -2295,9 +2301,13 @@ void server_models_routes::init_routes() {
                     std::ifstream f(path);
                     if (!f.is_open()) continue;
                     json j;
+                    std::string file_content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
                     try {
-                        f >> j;
+                        j = json::parse(file_content, nullptr, true, true);
                     } catch (...) {
+                        j = json::object();
+                    }
+                    if (j.is_discarded() || !j.is_object()) {
                         j = json::object();
                     }
                     f.close();
@@ -2323,9 +2333,13 @@ void server_models_routes::init_routes() {
                         {
                             std::ifstream chat_in(chat_path);
                             if (chat_in.is_open()) {
+                                std::string chat_content((std::istreambuf_iterator<char>(chat_in)), std::istreambuf_iterator<char>());
                                 try {
-                                    chat_in >> j_arr;
+                                    j_arr = json::parse(chat_content, nullptr, true, true);
                                 } catch (...) {
+                                    j_arr = json::array();
+                                }
+                                if (j_arr.is_discarded() || !j_arr.is_array()) {
                                     j_arr = json::array();
                                 }
                                 chat_in.close();

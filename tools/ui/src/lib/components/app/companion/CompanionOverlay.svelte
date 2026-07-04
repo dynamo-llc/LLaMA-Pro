@@ -15,6 +15,8 @@
     let isSettingsOpen = $state(false);
     let inputText = $state('');
     let isListening = $state(false);
+    let isPreparingMic = $state(false);
+    let isTranscribing = $state(false);
     let availableVoices = $state<SpeechSynthesisVoice[]>([]);
 
     // Transformers.js STT state
@@ -41,25 +43,49 @@
                 if (index < response.length) {
                     typedText += response[index];
                     index++;
+                    
+                    // Auto-scroll terminal
+                    const scrollContainer = document.getElementById('terminal-scroll-container');
+                    if (scrollContainer && index % 5 === 0) {
+                        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                    }
                 } else {
                     clearInterval(typewriterInterval);
+                    const scrollContainer = document.getElementById('terminal-scroll-container');
+                    if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
                 }
-            }, 20); // Fast typing speed
+            }, 10); // Fast typing speed
         } else {
             typedText = '';
             if (typewriterInterval) clearInterval(typewriterInterval);
+        }
+    });
+    
+    // Watch messages for scroll
+    $effect(() => {
+        if (companionStore.messages.length >= 0) {
+            setTimeout(() => {
+                const scrollContainer = document.getElementById('terminal-scroll-container');
+                if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+            }, 50);
         }
     });
 
     onMount(() => {
         // Create a subtle breathing animation for the orb
         pulseInterval = setInterval(() => {
-            if (companionStore.isThinking) {
+            if (isTranscribing) {
+                orbScale = 1.1 + Math.random() * 0.1;
+                orbHue = 35; // Orange for transcribing
+            } else if (companionStore.isThinking) {
                 orbScale = 1.1 + Math.random() * 0.15;
                 orbHue = 260 + Math.random() * 50; // Shift to purple/pink when thinking
             } else if (isListening) {
                 orbScale = 1.05 + Math.random() * 0.05;
                 orbHue = 140; // Green when listening
+            } else if (isPreparingMic) {
+                orbScale = 1.0 + Math.random() * 0.05;
+                orbHue = 60; // Yellow when preparing
             } else {
                 // Idle breathing
                 orbScale = 0.95 + Math.sin(Date.now() / 1500) * 0.05;
@@ -86,16 +112,18 @@
     }
 
     async function toggleListening() {
-        if (isListening) {
-            mediaRecorder?.stop();
+        if (isListening || isPreparingMic) {
+            if (isListening) mediaRecorder?.stop();
             isListening = false;
         } else {
             inputText = '';
+            isPreparingMic = true;
             toast.info("Loading speech recognition model...", { id: 'stt-loading' });
             try {
                 await initTranscriber();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 toast.dismiss('stt-loading');
+                isPreparingMic = false;
                 
                 mediaRecorder = new MediaRecorder(stream);
                 audioChunks = [];
@@ -116,15 +144,18 @@
                     const audioData = audioBuffer.getChannelData(0);
                     
                     toast.loading("Transcribing...", { id: 'stt-transcribing' });
+                    isTranscribing = true;
                     try {
                         const result = await transcriber(audioData);
                         inputText = result.text.trim();
                         toast.dismiss('stt-transcribing');
+                        isTranscribing = false;
                         if (inputText) {
                             handleSubmit();
                         }
                     } catch (err) {
                         toast.dismiss('stt-transcribing');
+                        isTranscribing = false;
                         console.error("Transcription error:", err);
                         toast.error("Failed to transcribe audio.");
                     }
@@ -134,6 +165,7 @@
                 isListening = true;
             } catch (err) {
                 toast.dismiss('stt-loading');
+                isPreparingMic = false;
                 console.error("Microphone access error:", err);
                 toast.error("Microphone error: Could not access microphone.");
             }
@@ -176,11 +208,22 @@
     </div>
 
     <!-- The Immersive Core (Visual Avatar) -->
-    <div class="flex-1 flex items-center justify-center relative">
-        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900/40 via-transparent to-transparent"></div>
+    <div class="flex-1 flex items-center justify-center relative overflow-hidden pr-0 md:pr-96">
         
+        <!-- Sci-Fi Background Elements -->
+        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900/40 via-transparent to-transparent z-0 pointer-events-none"></div>
+        <div class="absolute inset-0 bg-[linear-gradient(rgba(0,255,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,0,0.03)_1px,transparent_1px)] bg-[size:40px_40px] z-0 pointer-events-none" style="transform: perspective(500px) rotateX(60deg) scale(2) translateY(-100px); transform-origin: top center;"></div>
+        
+        <div class="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none z-0">
+            <div class="w-[80vw] h-[80vw] max-w-[800px] max-h-[800px] border border-green-500/20 rounded-full animate-[spin_60s_linear_infinite] border-dashed flex items-center justify-center">
+                <div class="w-[70%] h-[70%] border border-blue-500/20 rounded-full animate-[spin_40s_linear_infinite_reverse] border-dashed flex items-center justify-center">
+                    <div class="w-[50%] h-[50%] border-2 border-white/5 rounded-full animate-[spin_20s_linear_infinite] border-dotted"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- The Beating Digital Heart / Orb -->
-        <div class="relative flex items-center justify-center transition-all duration-300 ease-out" style="transform: scale({orbScale});">
+        <div class="relative flex flex-col items-center justify-center transition-all duration-300 ease-out z-10" style="transform: scale({orbScale});">
             
             <div class="absolute w-[400px] h-[400px] rounded-full blur-[100px] opacity-60 mix-blend-screen transition-colors duration-500" 
                  style="background-color: hsl({orbHue}, 100%, 50%);">
@@ -190,35 +233,73 @@
                  style="background-color: hsl({orbHue + 20}, 90%, 60%);">
             </div>
             
-            <div class="relative w-[120px] h-[120px] rounded-full bg-white shadow-[0_0_80px_rgba(255,255,255,1)] flex items-center justify-center overflow-hidden">
+            <div class="relative w-[120px] h-[120px] rounded-full bg-white shadow-[0_0_80px_rgba(255,255,255,1)] flex items-center justify-center overflow-hidden transition-all duration-300 {isListening ? 'ring-[8px] ring-red-500/50 shadow-[0_0_120px_rgba(255,0,0,0.8)]' : ''}">
                 <div class="absolute inset-0 bg-gradient-to-br from-white via-white/80 to-transparent mix-blend-overlay"></div>
                 <div class="absolute w-full h-full border-[2px] border-black/10 rounded-full {companionStore.isThinking ? 'animate-spin' : ''}" style="animation-duration: 3s;"></div>
                 <div class="absolute w-[80%] h-[80%] border-t-[3px] border-r-[3px] border-black/20 rounded-full {isListening ? 'animate-spin' : ''}" style="animation-duration: 1.5s; animation-direction: reverse;"></div>
+                {#if isListening}
+                    <div class="absolute inset-0 bg-red-500/20 animate-pulse rounded-full"></div>
+                {/if}
             </div>
             
         </div>
         
-        <!-- Status Text -->
-        <div class="absolute bottom-32 text-center w-full">
-            {#if companionStore.isThinking}
-                <p class="text-white/60 tracking-[0.3em] text-sm uppercase animate-pulse font-medium">Processing Directive...</p>
+        <!-- Status Indicators (Centralized) -->
+        <div class="absolute bottom-32 text-center w-full z-10 flex flex-col items-center justify-center pr-0 md:pr-96 pointer-events-none">
+            {#if isTranscribing}
+                <div class="flex items-center gap-3 bg-orange-900/40 px-6 py-3 rounded-full border border-orange-500/50 backdrop-blur-md shadow-[0_0_30px_rgba(255,165,0,0.3)] animate-[pulse_1s_ease-in-out_infinite]">
+                    <div class="w-3 h-3 bg-orange-500 rounded-full shadow-[0_0_10px_orange] animate-ping"></div>
+                    <span class="text-orange-400 font-bold tracking-[0.3em] uppercase text-sm drop-shadow-[0_0_5px_rgba(255,165,0,0.8)]">TRANSCRIBING AUDIO...</span>
+                </div>
             {:else if isListening}
-                <p class="text-green-400/80 tracking-[0.3em] text-sm uppercase animate-pulse font-medium">Awaiting Audio Input...</p>
+                <div class="flex items-center gap-3 bg-red-900/40 px-6 py-3 rounded-full border border-red-500/50 backdrop-blur-md shadow-[0_0_30px_rgba(255,0,0,0.3)] animate-[pulse_1s_ease-in-out_infinite]">
+                    <div class="w-3 h-3 bg-red-500 rounded-full shadow-[0_0_10px_red]"></div>
+                    <span class="text-red-400 font-bold tracking-[0.3em] uppercase text-sm drop-shadow-[0_0_5px_rgba(255,0,0,0.8)]">MIC ACTIVE - RECORDING</span>
+                </div>
+            {:else if isPreparingMic}
+                <p class="text-yellow-400/80 tracking-[0.3em] text-sm uppercase animate-pulse font-medium">Initializing Neural Mic...</p>
+            {:else if companionStore.isThinking}
+                <p class="text-white/60 tracking-[0.3em] text-sm uppercase animate-pulse font-medium">Processing Directive...</p>
             {:else}
                 <p class="text-white/30 tracking-[0.3em] text-xs uppercase font-medium">System Idle</p>
             {/if}
         </div>
+    </div>
 
-        <!-- AI Response Text -->
-        {#if typedText}
-            <div class="absolute bottom-40 w-full flex justify-center px-6" transition:fade>
-                <div class="max-w-2xl text-center max-h-32 overflow-y-auto no-scrollbar bg-black/20 backdrop-blur-md border border-white/5 rounded-2xl p-6 shadow-2xl">
-                    <p class="text-white/95 text-lg font-medium leading-relaxed drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
-                        {typedText}
-                    </p>
+    <!-- Green Screen Terminal (Right Panel) -->
+    <div class="hidden md:flex absolute right-0 top-0 bottom-0 w-96 bg-black/80 border-l border-green-500/30 backdrop-blur-xl z-30 flex-col font-mono text-green-500 shadow-[-20px_0_50px_rgba(0,0,0,0.5)]">
+        <div class="border-b border-green-500/30 p-4 bg-green-500/5 flex justify-between items-center">
+            <span class="text-xs font-bold tracking-widest text-green-400">TERMINAL OUTPUT</span>
+            <span class="text-[10px] opacity-50 text-green-400">v2.0.6</span>
+        </div>
+        
+        <div class="flex-1 p-6 overflow-y-auto overflow-x-hidden text-sm leading-relaxed whitespace-pre-wrap relative no-scrollbar" id="terminal-scroll-container">
+            <div class="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0)_50%,rgba(0,0,0,0.1)_50%)] bg-[size:100%_4px] pointer-events-none z-50 mix-blend-overlay"></div>
+            
+            {#each companionStore.messages as msg}
+                {#if msg.role === 'user' && msg.content && !msg.content.includes('The user has just activated you')}
+                    <div class="mb-6 opacity-60">
+                        <span class="text-blue-400 font-bold">&gt; USER_INPUT:</span><br/>
+                        <span class="ml-2">{msg.content}</span>
+                    </div>
+                {:else if msg.role === 'assistant' && msg.content}
+                    <div class="mb-6 text-green-400 font-medium drop-shadow-[0_0_8px_rgba(0,255,0,0.4)]">
+                        <span class="text-green-300 opacity-80 font-bold">SYS_RES:</span><br/>
+                        <span class="ml-2 block mt-1">{msg.content}</span>
+                    </div>
+                {/if}
+            {/each}
+            
+            {#if (companionStore.isThinking || typedText) && !companionStore.messages[companionStore.messages.length - 1]?.content?.includes(typedText)}
+                <div class="mb-6 text-green-400 font-medium drop-shadow-[0_0_8px_rgba(0,255,0,0.4)]">
+                    <span class="text-green-300 opacity-80 font-bold">SYS_RES:</span><br/>
+                    <span class="ml-2 block mt-1">{typedText}<span class="animate-pulse inline-block w-2.5 h-4 bg-green-500 ml-1 align-middle"></span></span>
                 </div>
-            </div>
-        {/if}
+            {/if}
+            
+            <!-- Dummy scroll anchor -->
+            <div id="terminal-bottom" class="h-4"></div>
+        </div>
     </div>
 
     <!-- Chat / Command Input Area -->
@@ -229,10 +310,11 @@
                 <Button 
                     variant="ghost" 
                     size="icon" 
-                    class="h-12 w-12 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors {isListening ? 'text-green-400 hover:text-green-300 bg-green-400/10' : ''}"
+                    class="h-12 w-12 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors {isListening ? 'text-green-400 hover:text-green-300 bg-green-400/10' : ''} {isPreparingMic ? 'text-yellow-400 bg-yellow-400/10' : ''} {isTranscribing ? 'text-orange-400 bg-orange-400/10' : ''}"
                     onclick={toggleListening}
+                    disabled={isTranscribing}
                 >
-                    <Mic class="h-5 w-5 {isListening ? 'animate-pulse' : ''}" />
+                    <Mic class="h-5 w-5 {isListening || isPreparingMic || isTranscribing ? 'animate-pulse' : ''}" />
                 </Button>
                 
                 <input 

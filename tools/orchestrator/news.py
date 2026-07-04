@@ -100,6 +100,7 @@ class NewsManager:
                     if not description and not image_url:
                         continue
                         
+                    description = description or ""
                     summary = description[:200] + "..." if len(description) > 200 else description
                     if not summary:
                         summary = "Link/Image post."

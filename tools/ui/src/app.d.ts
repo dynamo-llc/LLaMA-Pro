@@ -142,5 +142,8 @@ declare global {
 	interface Window {
 		idxThemeStyle?: number;
 		idxCodeBlock?: number;
+		llamaPort?: string;
+		orchestratorPort?: string;
+		electronAPI?: any;
 	}
 }

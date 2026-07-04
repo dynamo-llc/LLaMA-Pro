@@ -24,7 +24,7 @@
 		}
 
 		if (window.electronAPI && window.electronAPI.onBackendLog) {
-			window.electronAPI.onBackendLog((logEntry) => {
+			window.electronAPI.onBackendLog((logEntry: any) => {
 				logs = [...logs, { source: logEntry.source, text: logEntry.data }];
 				if (logs.length > 2000) {
 					// Keep a healthy buffer but allow massive scrollback

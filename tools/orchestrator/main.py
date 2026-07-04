@@ -229,7 +229,7 @@ def monitor_and_restart(cfg):
 def start_local_mcp_servers():
     base_dir = BASE_DIR
     
-    config_path = os.path.join(base_dir, "tools", "orchestrator", "mcp_configs.json")
+    config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             mcp_configs = json.load(f)
@@ -446,7 +446,7 @@ async def get_news():
 
 @app.get("/api/mcp")
 def get_mcps():
-    config_path = os.path.join(BASE_DIR, "tools", "orchestrator", "mcp_configs.json")
+    config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -458,7 +458,7 @@ def get_mcps():
 async def add_mcp(request: Request):
     try:
         data = await request.json()
-        config_path = os.path.join(BASE_DIR, "tools", "orchestrator", "mcp_configs.json")
+        config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
         configs = []
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
@@ -1465,9 +1465,14 @@ async def text_to_speech(req: TTSRequest):
         if not model_name.endswith(".onnx"):
             model_name += ".onnx"
             
-        model_path = os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models", model_name)
+        if getattr(sys, 'frozen', False):
+            model_dir = os.path.join(sys._MEIPASS, "tts_models")
+        else:
+            model_dir = os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models")
+            
+        model_path = os.path.join(model_dir, model_name)
         if not os.path.exists(model_path):
-            model_path = os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models", "en_GB-alan-medium.onnx")
+            model_path = os.path.join(model_dir, "en_GB-alan-medium.onnx")
             
         if model_path not in tts_models_cache:
             tts_models_cache[model_path] = PiperVoice.load(model_path, model_path + ".json")
@@ -1476,10 +1481,9 @@ async def text_to_speech(req: TTSRequest):
         
         wav_io = io.BytesIO()
         with wave.open(wav_io, 'wb') as wav_file:
-            voice.synthesize(req.text, wav_file)
+            voice.synthesize_wav(req.text, wav_file)
             
-        wav_io.seek(0)
-        return StreamingResponse(wav_io, media_type="audio/wav")
+        return Response(content=wav_io.getvalue(), media_type="audio/wav")
     except Exception as e:
         logger.error(f"TTS Error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
