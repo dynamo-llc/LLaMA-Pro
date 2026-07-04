@@ -1,4 +1,6 @@
-<script lang="ts">
+import fs from 'fs';
+
+const content = `<script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { Settings, Mic, SendHorizontal, Bot, X, Menu, SlidersHorizontal, Activity, Cpu, Network, Database, Target, BrainCircuit, Globe, Focus } from '@lucide/svelte';
     import { Button } from '$lib/components/ui/button';
@@ -654,3 +656,6 @@
         background: rgba(255, 42, 42, 0.8);
     }
 </style>
+`
+
+fs.writeFileSync('C:/Users/MONSTER/Desktop/LLAMA-SERVER-2.0/tools/ui/src/lib/components/app/companion/CompanionOverlay.svelte', content);

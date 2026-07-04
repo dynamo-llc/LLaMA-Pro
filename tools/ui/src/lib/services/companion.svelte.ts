@@ -9,50 +9,7 @@ export interface CompanionMessage {
     name?: string;
 }
 
-const TOOLS = [
-    {
-        type: "function",
-        function: {
-            name: "load_model",
-            description: "Load an LLM model by name.",
-            parameters: {
-                type: "object",
-                properties: {
-                    model: { type: "string" }
-                },
-                required: ["model"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "install_mcp_server",
-            description: "Install and start an MCP server from an npm package.",
-            parameters: {
-                type: "object",
-                properties: {
-                    package: { type: "string" }
-                },
-                required: ["package"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "toggle_mcp_server",
-            description: "Toggle an MCP server on or off by its port.",
-            parameters: {
-                type: "object",
-                properties: {
-                    port: { type: "integer" }
-                },
-                required: ["port"]
-            }
-        }
-    }
-];
+// TOOLS handled by the new Node.js Agent Backend
 
 class CompanionState {
     messages = $state<CompanionMessage[]>([]);
@@ -230,16 +187,25 @@ class CompanionState {
                 if (window.speechSynthesis) {
                     window.speechSynthesis.cancel();
                     const utterance = new SpeechSynthesisUtterance(text);
-                    const voices = window.speechSynthesis.getVoices();
-                    const isUS = this.selectedVoiceURI?.includes('en_US');
-                    let fallbackVoice = voices.find(v => 
-                        isUS ? (v.name.includes('US') || v.name.includes('United States') || v.lang === 'en-US')
-                             : (v.name.includes('Google UK English Male') || v.name.includes('Great Britain') || v.lang === 'en-GB')
-                    );
-                    if (fallbackVoice) utterance.voice = fallbackVoice;
-                    utterance.onend = () => resolve();
-                    utterance.onerror = () => resolve();
-                    window.speechSynthesis.speak(utterance);
+                    
+                    const setVoiceAndSpeak = () => {
+                        const voices = window.speechSynthesis.getVoices();
+                        const isUS = this.selectedVoiceURI?.includes('en_US');
+                        let fallbackVoice = voices.find(v => 
+                            isUS ? (v.name.includes('US') || v.name.includes('United States') || v.lang === 'en-US')
+                                 : (v.name.includes('Google UK English Male') || v.name.includes('Great Britain') || v.lang === 'en-GB')
+                        ) || voices[0];
+                        if (fallbackVoice) utterance.voice = fallbackVoice;
+                        utterance.onend = () => resolve();
+                        utterance.onerror = () => resolve();
+                        window.speechSynthesis.speak(utterance);
+                    };
+
+                    if (window.speechSynthesis.getVoices().length === 0) {
+                        window.speechSynthesis.onvoiceschanged = setVoiceAndSpeak;
+                    } else {
+                        setVoiceAndSpeak();
+                    }
                 } else {
                     resolve();
                 }
@@ -259,10 +225,8 @@ class CompanionState {
         this.activeResponse = '';
         
         try {
-            const isDesktop = window.location.protocol === 'app:';
-            const host = (isDesktop || !window.location.hostname || window.location.hostname === '') ? '127.0.0.1' : window.location.hostname;
-            const orchestratorPort = (window as any).orchestratorPort || '8000';
-            const endpoint = `http://${host}:${orchestratorPort}/v1/chat/completions`;
+            // Point to new Agentic Backend Server
+            const endpoint = `http://127.0.0.1:3000/v1/chat/completions`;
 
             let fallbackModel = "default";
             if (modelsStore.loadedModelIds && modelsStore.loadedModelIds.length > 0) {
@@ -284,9 +248,7 @@ class CompanionState {
             const payload = {
                 model: activeModel,
                 messages: this.messages,
-                stream: true,
-                tools: TOOLS,
-                tool_choice: "auto"
+                stream: true
             };
 
             const res = await fetch(endpoint, {
@@ -366,84 +328,13 @@ class CompanionState {
 
             if (fullContent) {
                 this.messages.push({ role: 'assistant', content: fullContent });
-            } else if (isToolCall) {
-                this.messages.push({
-                    role: 'assistant',
-                    content: "",
-                    tool_calls: [{
-                        id: toolCallId,
-                        type: "function",
-                        function: { name: toolCallName, arguments: toolCallArgs }
-                    }]
-                });
-                
-                const result = await this.executeTool({ function: { name: toolCallName, arguments: toolCallArgs }});
-                this.messages.push({
-                    role: 'tool',
-                    tool_call_id: toolCallId,
-                    name: toolCallName,
-                    content: JSON.stringify(result)
-                });
-                await this.streamLLMResponse(depth + 1);
             }
 
         } catch (error: any) {
             console.error("Companion Error:", error);
-            toast.error(`${this.companionName} Error: ${error?.message || "Failed to communicate with model."}`);
+            toast.error(`${this.companionName} Error: ${error?.message || "Failed to communicate with agent server."}`);
         } finally {
             this.isThinking = false;
-        }
-    }
-
-    async executeTool(toolCall: any): Promise<any> {
-        const name = toolCall.function.name;
-        let args: any = {};
-        try { args = JSON.parse(toolCall.function.arguments); } catch(e) {}
-
-        console.log(`[CompanionService] Executing tool: ${name}`, args);
-
-        try {
-            if (name === 'load_model') {
-                if (!args.model) return { status: "error", message: "Missing 'model' parameter. Please specify a valid model name." };
-                toast.info(`Jarvis: Loading model ${args.model}...`);
-                await modelsStore.loadModel(args.model);
-                toast.success(`Jarvis: Successfully loaded ${args.model}.`);
-                return { status: "success", message: `Model ${args.model} loaded.` };
-            } 
-            
-            if (name === 'install_mcp_server') {
-                if (!args.package) return { status: "error", message: "Missing 'package' parameter. Please specify an NPM package." };
-                toast.info(`Jarvis: Installing MCP server from ${args.package}...`);
-                
-                const response = await fetch('/api/mcp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: args.package,
-                        port: 8090 + Math.floor(Math.random() * 100),
-                        cmd: ["npx", "-y", args.package],
-                        cwd: "tools/mcp"
-                    })
-                });
-
-                if (!response.ok) throw new Error("Failed to install MCP server");
-                
-                toast.success(`Jarvis: Installed and started ${args.package}.`);
-                return { status: "success", message: `Installed ${args.package}` };
-            }
-
-            if (name === 'toggle_mcp_server') {
-                toast.info(`Jarvis: Toggling MCP server on port ${args.port}...`);
-                const response = await fetch(`/api/mcp/${args.port}/toggle`, { method: 'POST' });
-                if (!response.ok) throw new Error("Failed to toggle MCP server");
-                toast.success(`Jarvis: Toggled MCP server on port ${args.port}.`);
-                return { status: "success", message: `Toggled ${args.port}` };
-            }
-
-            return { status: "error", message: `Unknown tool ${name}` };
-        } catch (error) {
-            console.error(`[CompanionService] Tool error:`, error);
-            return { status: "error", message: String(error) };
         }
     }
 }
