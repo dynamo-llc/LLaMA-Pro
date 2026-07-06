@@ -5,8 +5,8 @@
 	import { ROUTES } from '$lib/constants/routes';
 	import { APP_NAME } from '$lib/constants';
 
-	let error = $derived($page.error);
-	let status = $derived($page.status);
+	let error = $derived(page.error);
+	let status = $derived(page.status);
 
 	// Check if this is an API key related error
 	let isApiKeyError = $derived(

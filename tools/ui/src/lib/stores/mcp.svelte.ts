@@ -405,7 +405,7 @@ class MCPStore {
 				const mimeEnd = src.indexOf(';');
 				if (mimeEnd === -1) return false;
 				const mime = src.slice(UrlProtocol.DATA.length, mimeEnd);
-				return MCP_ALLOWED_ICON_MIME_TYPES.has(mime);
+				return MCP_ALLOWED_ICON_MIME_TYPES.has(mime as any);
 			}
 
 			const url = new URL(src);
