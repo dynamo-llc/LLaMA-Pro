@@ -139,4 +139,23 @@ class NewsManager:
         self.fetch_external_news()
         return self.news_cache
 
+    def add_internal_news(self, title: str, summary: str, full_text: str):
+        news_id = f"self-upgrade-{int(time.time())}"
+        new_item = {
+            "id": news_id,
+            "title": title,
+            "summary": summary,
+            "full_text": full_text,
+            "image_url": "/news/upgrade.png",
+            "source": "Self-Upgrade Daemon",
+            "url": "#/settings",
+            "date": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            "is_internal": True
+        }
+        self.internal_news.insert(0, new_item)
+        external_cached = [item for item in self.news_cache if not item.get('is_internal')]
+        self.news_cache = self.internal_news + external_cached
+        self._save_cache()
+        logger.info(f"Dynamically registered news: {title}")
+
 news_manager = NewsManager()

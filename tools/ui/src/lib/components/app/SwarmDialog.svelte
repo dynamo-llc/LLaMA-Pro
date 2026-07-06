@@ -7,6 +7,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Trash2, Plus, Network, Cpu, Copy, Star } from '@lucide/svelte';
 	import { modelsStore } from '$lib/stores/models.svelte';
+	import { getBaseUrl } from '$lib/utils/get-base-url';
 
 	let { open = $bindable(false), onsaved } = $props();
 
@@ -30,14 +31,14 @@
 	let selectedConfigId = $state<string>('');
 	let activeConfigId = $state<string>('');
 	let loading = $state(false);
-	let swarmEndpoint = 'http://127.0.0.1:8000/v1/swarm/chat/completions';
+	let swarmEndpoint = $derived(`${getBaseUrl('orchestrator')}/v1/swarm/chat/completions`);
 
 	let selectedConfigIndex = $derived(configs.findIndex((c) => c.id === selectedConfigId));
 
 	// Fetch current configuration
 	async function loadConfig() {
 		try {
-			const res = await fetch('http://127.0.0.1:8000/v1/swarm/config');
+			const res = await fetch(`${getBaseUrl('orchestrator')}/v1/swarm/config`);
 			if (res.ok) {
 				const data = await res.json();
 				configs = data.configs || [];
@@ -80,7 +81,7 @@
 					{
 						id: `node-${Date.now()}`,
 						role: 'worker',
-						url: 'http://127.0.0.1:8080/v1',
+						url: `${getBaseUrl('llama')}/v1`,
 						modelName: '',
 						temperature: 0.8,
 						persona: 'You are a helpful assistant.',
@@ -128,7 +129,7 @@
 			{
 				id,
 				role: 'worker',
-				url: 'http://127.0.0.1:8080/v1',
+				url: `${getBaseUrl('llama')}/v1`,
 				modelName: '',
 				temperature: 0.7,
 				persona: 'You are a helpful assistant.',
@@ -147,7 +148,7 @@
 	async function saveConfig() {
 		loading = true;
 		try {
-			const res = await fetch('http://127.0.0.1:8000/v1/swarm/config', {
+			const res = await fetch(`${getBaseUrl('orchestrator')}/v1/swarm/config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ configs, active_config_id: activeConfigId || null })
@@ -327,7 +328,7 @@
 									class="flex-1 w-full bg-background border border-border/50 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary truncate font-medium text-foreground"
 									onchange={(e) => {
 										if (e.currentTarget.value === 'local') {
-											node.url = 'http://127.0.0.1:8080/v1';
+											node.url = `${getBaseUrl('llama')}/v1`;
 											node.modelName = '';
 										} else {
 											node.url = '';

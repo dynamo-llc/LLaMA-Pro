@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Trash2, AlertCircle, RefreshCw } from '@lucide/svelte';
 	import { DialogConfirmation } from '$lib/components/app';
+	import { getDaemonUrl } from '$lib/utils/get-base-url';
 
 	let entries = $state<Array<{timestamp: string, prompt: string, chosen: string, rejected: string}>>([]);
 	let loading = $state(true);
 	let showClearDialog = $state(false);
+	let activeTrainingSource: EventSource | null = null;
 
 	// Training state
 	let isTraining = $state(false);
@@ -28,7 +30,7 @@
 	async function fetchDataset() {
 		loading = true;
 		try {
-			const res = await fetch('http://127.0.0.1:50054/feedback');
+			const res = await fetch(`${getDaemonUrl('echo')}/feedback`);
 			const data = await res.json();
 			entries = data.entries || [];
 		} catch (err) {
@@ -40,7 +42,7 @@
 
 	async function clearDataset() {
 		try {
-			await fetch('http://127.0.0.1:50054/feedback', { method: 'DELETE' });
+			await fetch(`${getDaemonUrl('echo')}/feedback`, { method: 'DELETE' });
 			entries = [];
 			trainingComplete = false;
 			lossHistory = [];
@@ -56,7 +58,9 @@
 		lossHistory = [];
 		trainingStats = { epoch: 0, maxEpochs: 20, loss: '2.4500', message: 'Initializing training pipeline...' };
 
-		const source = new EventSource('http://127.0.0.1:50054/train');
+		if (activeTrainingSource) activeTrainingSource.close();
+		const source = new EventSource(`${getDaemonUrl('echo')}/train`);
+		activeTrainingSource = source;
 
 		source.onmessage = (event) => {
 			const data = JSON.parse(event.data);
@@ -95,6 +99,13 @@
 
 	onMount(() => {
 		fetchDataset();
+	});
+
+	onDestroy(() => {
+		if (activeTrainingSource) {
+			activeTrainingSource.close();
+			activeTrainingSource = null;
+		}
 	});
 </script>
 

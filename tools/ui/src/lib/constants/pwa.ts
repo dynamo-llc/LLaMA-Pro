@@ -310,6 +310,7 @@ import type { SvelteKitPWAOptions } from '@vite-pwa/sveltekit';
 export const SVELTEKIT_PWA_OPTIONS: SvelteKitPWAOptions = {
 	// Strategy: generateSW - the plugin generates a service worker automatically
 	// using Workbox. For a custom SW, use 'injectManifest' instead.
+	registerType: 'autoUpdate',
 	// Manifest configuration
 	manifest: PWA_MANIFEST,
 

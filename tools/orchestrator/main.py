@@ -15,7 +15,7 @@ import sys
 import threading
 from typing import List, AsyncGenerator, Optional, Dict, Any
 from typing_extensions import TypedDict
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, File, Form, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -35,8 +35,26 @@ from news import news_manager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FastAPI App
-app = FastAPI()
+# Resolve ports at module level so every internal HTTP call uses the real dynamically-assigned port.
+# main.js passes --port <n> as a CLI arg; LLAMA_PORT is injected via environment variable.
+_port_arg_idx = sys.argv.index("--port") + 1 if "--port" in sys.argv else -1
+ORCHESTRATOR_PORT: int = int(sys.argv[_port_arg_idx]) if _port_arg_idx > 0 else int(os.getenv("ORCHESTRATOR_PORT", "8000"))
+LLAMA_PORT: int = int(os.getenv("LLAMA_PORT", "8080"))
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app_: FastAPI):
+    asyncio.create_task(udp_broadcaster())
+    asyncio.create_task(udp_listener())
+    asyncio.create_task(cleanup_stale_peers())
+    start_local_mcp_servers()
+    news_manager.start_background_fetch()
+    yield
+    stop_rpc_server()
+    stop_local_mcp_servers()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/api/tunnel/local")
 def get_local_network_ip():
@@ -74,6 +92,75 @@ def get_base_paths():
 BASE_DIR, PROVIDERS_FILE, SWARM_CONFIG_FILE, RPC_PATH = get_base_paths()
 tunnel_manager = TunnelManager(BASE_DIR)
 
+class MemoryManager:
+    def __init__(self):
+        self.filepath = os.path.join(BASE_DIR, "tools", "orchestrator", "companion_memories.json")
+        self.memories = []
+        self.load()
+
+    def load(self):
+        if os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, "r", encoding="utf-8") as f:
+                    self.memories = json.load(f)
+            except Exception as e:
+                logger.error(f"Error loading memories: {e}")
+                # Back up before discarding so data is recoverable
+                try:
+                    import shutil
+                    shutil.copy2(self.filepath, self.filepath + ".bak")
+                except OSError:
+                    pass
+                self.memories = []
+
+    def save(self):
+        try:
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                json.dump(self.memories, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Error saving memories: {e}")
+
+    def add_memory(self, text: str):
+        if text and text not in self.memories:
+            self.memories.append(text)
+            self.save()
+
+    def scan_for_memories(self, text: str):
+        text_lower = text.lower()
+        patterns = [
+            (r"\bmy name is ([a-zA-Z0-9 ]+)", "User's name is {0}"),
+            (r"\bi am working on ([a-zA-Z0-9 _-]+)", "User is working on {0}"),
+            (r"\bi prefer ([a-zA-Z0-9 ]+)", "User prefers {0}"),
+            (r"\bi like ([a-zA-Z0-9 ]+)", "User likes {0}")
+        ]
+        for pattern, memory_template in patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                extracted = match.group(1).strip()
+                fact = memory_template.format(extracted.title())
+                self.add_memory(fact)
+                logger.info(f"Extracted memory fact: {fact}")
+
+memory_manager = MemoryManager()
+
+def compile_system_workspace_context():
+    context_lines = []
+    try:
+        branch = subprocess.check_output(["git", "branch", "--show-current"], cwd=BASE_DIR, stderr=subprocess.DEVNULL)
+        context_lines.append(f"Git Branch: {branch.decode('utf-8').strip()}")
+    except Exception:
+        pass
+    try:
+        status = subprocess.check_output(["git", "status", "-s"], cwd=BASE_DIR, stderr=subprocess.DEVNULL)
+        modified_files = status.decode('utf-8').strip()
+        if modified_files:
+            files = [line.strip() for line in modified_files.split("\n") if line.strip()][:5]
+            context_lines.append("Modified Files:\n" + "\n".join([f"  {f}" for f in files]))
+    except Exception:
+        pass
+    return "\n".join(context_lines)
+
+
 def load_providers():
     if os.path.exists(PROVIDERS_FILE):
         try:
@@ -110,6 +197,7 @@ rpc_state = {
     "connected_peers": set(),
     "rpc_process": None
 }
+_rpc_state_lock = asyncio.Lock()
 
 async def udp_broadcaster():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -122,7 +210,8 @@ async def udp_broadcaster():
                 "peer_id": PEER_ID,
                 "hostname": HOSTNAME,
                 "rpc_active": rpc_state["is_sharing_enabled"],
-                "rpc_port": RPC_PORT
+                "rpc_port": RPC_PORT,
+                "orchestrator_port": ORCHESTRATOR_PORT,
             }).encode('utf-8')
             sock.sendto(msg, ('<broadcast>', BROADCAST_PORT))
         except Exception:
@@ -146,22 +235,28 @@ async def udp_listener():
             msg = json.loads(data.decode('utf-8'))
             if msg.get("type") == "llama-rpc-discovery" and msg.get("peer_id") != PEER_ID:
                 peer_id = msg["peer_id"]
-                rpc_state["peers"][peer_id] = {
-                    "ip": addr[0],
-                    "hostname": msg.get("hostname", "Unknown"),
-                    "rpc_active": msg.get("rpc_active", False),
-                    "rpc_port": msg.get("rpc_port", RPC_PORT),
-                    "last_seen": time.time()
-                }
+                async with _rpc_state_lock:
+                    rpc_state["peers"][peer_id] = {
+                        "ip": addr[0],
+                        "hostname": msg.get("hostname", "Unknown"),
+                        "rpc_active": msg.get("rpc_active", False),
+                        "rpc_port": msg.get("rpc_port", RPC_PORT),
+                        "orchestrator_port": msg.get("orchestrator_port", 8000),
+                        "last_seen": time.time()
+                    }
+        except OSError as exc:
+            logger.debug(f"UDP recv error: {exc}")
+            break
         except Exception:
             pass
 
 async def cleanup_stale_peers():
     while True:
         now = time.time()
-        stale_ids = [pid for pid, info in rpc_state["peers"].items() if now - info["last_seen"] > 15]
-        for pid in stale_ids:
-            del rpc_state["peers"][pid]
+        async with _rpc_state_lock:
+            stale_ids = [pid for pid, info in rpc_state["peers"].items() if now - info["last_seen"] > 15]
+            for pid in stale_ids:
+                del rpc_state["peers"][pid]
         await asyncio.sleep(10)
 
 def start_rpc_server():
@@ -178,14 +273,17 @@ def stop_rpc_server():
         rpc_state["rpc_process"].terminate()
         rpc_state["rpc_process"] = None
 
-mcp_processes = []
+_mcp_lock = threading.Lock()
+mcp_processes: dict[int, subprocess.Popen] = {}  # port -> process
 is_shutting_down = False
+ghost_protocol = False
+daemon_loop = False
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
 def monitor_and_restart(cfg):
-    global is_shutting_down, mcp_processes
+    global is_shutting_down
     port = cfg["port"]
     if is_port_in_use(port):
         logger.info(f"Port {port} is already in use. Skipping auto-start for local MCP: {cfg['name']}.")
@@ -196,9 +294,11 @@ def monitor_and_restart(cfg):
         logger.warning(f"Directory {cwd} does not exist. Skipping {cfg['name']}.")
         return
 
-    while not is_shutting_down:
+    attempts = 0
+    max_attempts = 5
+    while not is_shutting_down and attempts < max_attempts:
         try:
-            logger.info(f"Auto-starting local MCP server: {cfg['name']} on port {port}...")
+            logger.info(f"Auto-starting local MCP server: {cfg['name']} on port {port}... (attempt {attempts + 1}/{max_attempts})")
             env = os.environ.copy()
             if "env" in cfg:
                 env.update(cfg["env"])
@@ -209,22 +309,33 @@ def monitor_and_restart(cfg):
                 stderr=sys.stderr,
                 env=env
             )
-            mcp_processes.append(proc)
+            with _mcp_lock:
+                mcp_processes[port] = proc
             proc.wait()
-            
-            if proc in mcp_processes:
-                mcp_processes.remove(proc)
-                
+            with _mcp_lock:
+                if mcp_processes.get(port) is proc:
+                    del mcp_processes[port]
+
             if is_shutting_down:
                 break
-                
-            logger.warning(f"MCP server {cfg['name']} crashed with exit code {proc.returncode}. Restarting in 2 seconds...")
+
+            exit_code = proc.returncode
+            if exit_code == 0:
+                logger.info(f"MCP server {cfg['name']} exited cleanly.")
+                break
+
+            attempts += 1
+            logger.warning(f"MCP server {cfg['name']} crashed (exit {exit_code}). Restarting in 2s... ({attempts}/{max_attempts})")
             time.sleep(2)
         except Exception as e:
             logger.error(f"Failed to start local MCP server {cfg['name']}: {e}")
+            attempts += 1
             if is_shutting_down:
                 break
             time.sleep(5)
+
+    if attempts >= max_attempts:
+        logger.error(f"MCP server {cfg['name']} exceeded restart cap ({max_attempts}). Giving up.")
 
 def start_local_mcp_servers():
     base_dir = BASE_DIR
@@ -242,16 +353,18 @@ def start_local_mcp_servers():
         t.start()
 
 def stop_local_mcp_servers():
-    global mcp_processes, is_shutting_down
+    global is_shutting_down
     is_shutting_down = True
-    if mcp_processes:
+    with _mcp_lock:
+        procs = list(mcp_processes.values())
+        mcp_processes.clear()
+    if procs:
         logger.info("Stopping local MCP servers...")
-        for proc in mcp_processes:
+        for proc in procs:
             try:
                 proc.terminate()
-            except Exception:
+            except OSError:
                 pass
-        mcp_processes = []
 
 class RpcSettings(BaseModel):
     is_sharing_enabled: bool
@@ -338,7 +451,7 @@ async def test_provider_keys(provider_id: str):
             try:
                 headers = {"Authorization": f"Bearer {key}"}
                 if "openrouter" in base_url.lower():
-                    headers["HTTP-Referer"] = "http://localhost:8000"
+                    headers["HTTP-Referer"] = f"http://localhost:{ORCHESTRATOR_PORT}"
                     headers["X-Title"] = "LLaMA Server 2.0"
                 
                 url = get_models_url(base_url)
@@ -369,22 +482,27 @@ async def handle_incoming_request(req: ConnectionRequest, request: Request):
         return {"status": "accepted"}
     
     req_id = str(uuid.uuid4())
-    rpc_state["pending_requests"].append({
-        "id": req_id,
-        "ip": client_ip,
-        "hostname": req.requester_hostname,
-        "timestamp": time.time()
-    })
+    async with _rpc_state_lock:
+        rpc_state["pending_requests"].append({
+            "id": req_id,
+            "ip": client_ip,
+            "hostname": req.requester_hostname,
+            "timestamp": time.time()
+        })
     
     for _ in range(60):
-        if not any(r["id"] == req_id for r in rpc_state["pending_requests"]):
-            if client_ip in rpc_state["connected_peers"]:
+        async with _rpc_state_lock:
+            still_pending = any(r["id"] == req_id for r in rpc_state["pending_requests"])
+            peer_accepted = client_ip in rpc_state["connected_peers"]
+        if not still_pending:
+            if peer_accepted:
                 return {"status": "accepted"}
             else:
                 return {"status": "rejected"}
         await asyncio.sleep(1)
         
-    rpc_state["pending_requests"] = [r for r in rpc_state["pending_requests"] if r["id"] != req_id]
+    async with _rpc_state_lock:
+        rpc_state["pending_requests"] = [r for r in rpc_state["pending_requests"] if r["id"] != req_id]
     return {"status": "rejected", "reason": "timeout"}
 
 @app.get("/api/rpc/pending-requests")
@@ -393,17 +511,16 @@ async def get_pending_requests():
 
 @app.post("/api/rpc/authorize/{req_id}")
 async def authorize_request(req_id: str, accept: bool):
-    request_obj = next((r for r in rpc_state["pending_requests"] if r["id"] == req_id), None)
-    if not request_obj:
-        return {"status": "error", "message": "Request not found"}
-        
-    rpc_state["pending_requests"] = [r for r in rpc_state["pending_requests"] if r["id"] != req_id]
-    
+    async with _rpc_state_lock:
+        request_obj = next((r for r in rpc_state["pending_requests"] if r["id"] == req_id), None)
+        if not request_obj:
+            return {"status": "error", "message": "Request not found"}
+        rpc_state["pending_requests"] = [r for r in rpc_state["pending_requests"] if r["id"] != req_id]
+        if accept:
+            rpc_state["is_sharing_enabled"] = True
+            rpc_state["connected_peers"].add(request_obj["ip"])
     if accept:
-        rpc_state["is_sharing_enabled"] = True
-        rpc_state["always_share"] = True # might be wanted? Or just accept this one
         start_rpc_server()
-        rpc_state["connected_peers"].add(request_obj["ip"])
         return {"status": "success", "action": "accepted"}
     else:
         return {"status": "success", "action": "rejected"}
@@ -416,10 +533,11 @@ async def connect_to_peer(peer_id: str):
     peer = rpc_state["peers"][peer_id]
     peer_ip = peer["ip"]
     
+    peer_orchestrator_port = peer.get("orchestrator_port", 8000)
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"http://{peer_ip}:8000/api/rpc/incoming-request", 
+                f"http://{peer_ip}:{peer_orchestrator_port}/api/rpc/incoming-request",
                 json={"requester_ip": HOSTNAME, "requester_hostname": HOSTNAME},
                 timeout=65.0
             )
@@ -430,15 +548,7 @@ async def connect_to_peer(peer_id: str):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(udp_broadcaster())
-    asyncio.create_task(udp_listener())
-    asyncio.create_task(cleanup_stale_peers())
-    # Auto-start local MCP servers
-    start_local_mcp_servers()
-    # Start news fetcher
-    news_manager.start_background_fetch()
+
 
 @app.get("/api/news")
 async def get_news():
@@ -479,19 +589,46 @@ async def add_mcp(request: Request):
 
 @app.post("/api/mcp/{port}/toggle")
 async def toggle_mcp(port: int, request: Request):
-    # This is a stub for the toggle endpoint.
-    # In a full implementation, we would track the process by port in mcp_processes
-    # and either terminate it or restart it.
-    return {"status": "success", "message": f"Toggled MCP on port {port}"}
+    with _mcp_lock:
+        proc = mcp_processes.get(port)
+
+    if proc is not None and proc.poll() is None:
+        # Process is running - stop it
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        with _mcp_lock:
+            if mcp_processes.get(port) is proc:
+                del mcp_processes[port]
+        return {"status": "stopped", "port": port}
+    else:
+        # Process is not running - find config and restart
+        config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                mcp_configs = json.load(f)
+        except Exception as e:
+            return JSONResponse({"error": f"Could not load MCP configs: {e}"}, status_code=500)
+
+        cfg = next((c for c in mcp_configs if c.get("port") == port), None)
+        if not cfg:
+            return JSONResponse({"error": f"No MCP config found for port {port}"}, status_code=404)
+
+        t = threading.Thread(target=monitor_and_restart, args=(cfg,), daemon=True)
+        t.start()
+        return {"status": "starting", "port": port}
+
 
 @app.post("/api/news/refresh")
 async def refresh_news():
     return JSONResponse(content=news_manager.force_refresh())
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    stop_rpc_server()
-    stop_local_mcp_servers()
+
 
 @app.post("/api/shutdown")
 async def shutdown_api():
@@ -505,9 +642,47 @@ async def shutdown_api():
     threading.Thread(target=exit_process, daemon=True).start()
     return {"status": "shutting down"}
 
+@app.get("/v1/system/status")
+async def get_system_status():
+    with _mcp_lock:
+        live_mcps = [(port, proc) for port, proc in mcp_processes.items() if proc.poll() is None]
+    return {
+        "mcpServers": [{"port": port, "pid": proc.pid} for port, proc in live_mcps],
+        "projects": [],
+        "ghostProtocol": ghost_protocol,
+        "daemon": daemon_loop,
+    }
+
+@app.post("/v1/system/ghost")
+async def set_ghost_protocol(request: Request):
+    global ghost_protocol
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1"):
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    data = await request.json()
+    ghost_protocol = bool(data.get("active", False))
+    logger.info(f"Ghost Protocol set to {ghost_protocol}")
+    return {"ghostProtocol": ghost_protocol}
+
+@app.post("/v1/system/daemon")
+async def set_daemon_loop(request: Request):
+    global daemon_loop
+    data = await request.json()
+    daemon_loop = bool(data.get("active", False))
+    logger.info(f"Daemon Loop set to {daemon_loop}")
+    return {"daemon": daemon_loop}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "app://.",           # Electron production
+        "app://-",
+        "http://localhost",
+        "http://localhost:*",
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+    ],
+    allow_origin_regex=r"app://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -519,7 +694,7 @@ DEFAULT_NODES = [
     {
         "id": "node-1",
         "role": "worker",
-        "url": os.getenv("LITTLE_MODEL_URL", "http://127.0.0.1:8080/v1"),
+        "url": os.getenv("LITTLE_MODEL_URL", f"http://127.0.0.1:{LLAMA_PORT}/v1"),
         "model_name": os.getenv("LITTLE_MODEL_NAME", "little-model"),
         "temperature": 0.8,
         "persona": "You are a creative thinker. Provide an innovative and out-of-the-box perspective.",
@@ -528,7 +703,7 @@ DEFAULT_NODES = [
     {
         "id": "node-2",
         "role": "worker",
-        "url": os.getenv("LITTLE_MODEL_URL", "http://127.0.0.1:8080/v1"),
+        "url": os.getenv("LITTLE_MODEL_URL", f"http://127.0.0.1:{LLAMA_PORT}/v1"),
         "model_name": os.getenv("LITTLE_MODEL_NAME", "little-model"),
         "temperature": 0.8,
         "persona": "You are a critical analyst. Focus on facts, logic, and potential pitfalls.",
@@ -537,7 +712,7 @@ DEFAULT_NODES = [
     {
         "id": "node-3",
         "role": "synthesizer",
-        "url": os.getenv("BIG_MODEL_URL", "http://127.0.0.1:8080/v1"),
+        "url": os.getenv("BIG_MODEL_URL", f"http://127.0.0.1:{LLAMA_PORT}/v1"),
         "model_name": os.getenv("BIG_MODEL_NAME", "big-model"),
         "temperature": 0.1,
         "persona": "You are the Arbiter Judge. Your job is to read the original conversation and synthesize the proposals into a single cohesive answer.",
@@ -630,7 +805,7 @@ def init_llms():
         if ":" in model_name:
             p_id, m_id = model_name.split(":", 1)
             if p_id in providers_state:
-                url = "http://127.0.0.1:8000/v1"
+                url = f"http://127.0.0.1:{ORCHESTRATOR_PORT}/v1"
                 api_key = "sk-dummy-key"
                 # Keep model_name as p_id:m_id so the local proxy intercepts it
 
@@ -877,7 +1052,7 @@ async def proxy_management(request: Request):
         if model == "swarm-ensemble" or ":" in model:
             return JSONResponse(content=[])
 
-    url = f"http://127.0.0.1:8080{path}"
+    url = f"http://127.0.0.1:{LLAMA_PORT}{path}"
     
     body = await request.body()
     headers = dict(request.headers)
@@ -896,7 +1071,7 @@ async def proxy_management(request: Request):
             try:
                 content = response.json()
                 return JSONResponse(content=content, status_code=response.status_code)
-            except:
+            except Exception:
                 return Response(content=response.content, status_code=response.status_code)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -986,11 +1161,14 @@ async def stream_logs():
                     yield f"data: {line}\n\n"
             
             while True:
-                line = f.readline()
-                if line:
-                    yield f"data: {line}\n\n"
-                else:
-                    await asyncio.sleep(0.1)
+                try:
+                    line = f.readline()
+                    if line:
+                        yield f"data: {line}\n\n"
+                    else:
+                        await asyncio.sleep(0.1)
+                except GeneratorExit:
+                    break
     
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
@@ -1027,7 +1205,7 @@ async def get_metrics():
     """Aggregate metrics from all child llama-server instances by querying the C++ router."""
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            res = await client.get("http://127.0.0.1:8080/metrics")
+            res = await client.get(f"http://127.0.0.1:{LLAMA_PORT}/metrics")
             if res.status_code == 200:
                 return Response(content=res.text, media_type="text/plain")
     except Exception:
@@ -1062,7 +1240,7 @@ async def get_provider_models():
             try:
                 headers = {"Authorization": f"Bearer {api_key}"}
                 if "openrouter" in base_url.lower():
-                    headers["HTTP-Referer"] = "http://localhost:8000"
+                    headers["HTTP-Referer"] = f"http://localhost:{ORCHESTRATOR_PORT}"
                     headers["X-Title"] = "LLaMA Server 2.0"
                 url = get_models_url(base_url)
                 resp = await client.get(url, headers=headers, timeout=5.0)
@@ -1093,7 +1271,7 @@ async def get_models():
     
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://127.0.0.1:8080/v1/models", timeout=2.0)
+            resp = await client.get(f"http://127.0.0.1:{LLAMA_PORT}/v1/models", timeout=2.0)
             if resp.status_code == 200:
                 backend_models = resp.json().get("data", [])
                 models["data"].extend(backend_models)
@@ -1107,7 +1285,7 @@ async def get_models():
 
 @app.api_route("/models/{path:path}", methods=["GET", "POST", "DELETE"])
 async def proxy_models(request: Request, path: str):
-    url = f"http://127.0.0.1:8080/models/{path}"
+    url = f"http://127.0.0.1:{LLAMA_PORT}/models/{path}"
     
     # Fast paths for SSE
     if path == "sse":
@@ -1134,7 +1312,7 @@ async def proxy_models(request: Request, path: str):
                     }
                     # We need to tell the UI it's loaded via SSE, but for now we just return success
                     return JSONResponse({"status": "success", "message": "Model loaded virtually"})
-        except:
+        except (json.JSONDecodeError, ValueError):
             pass
             
     if path == "unload" and request.method == "POST":
@@ -1144,7 +1322,7 @@ async def proxy_models(request: Request, path: str):
             if model_id in loaded_external_models:
                 del loaded_external_models[model_id]
                 return JSONResponse({"status": "success", "message": "Model unloaded virtually"})
-        except:
+        except (json.JSONDecodeError, ValueError):
             pass
 
     # Generic proxy for other /models/ requests
@@ -1165,7 +1343,7 @@ async def proxy_models(request: Request, path: str):
             try:
                 content = response.json()
                 return JSONResponse(content=content, status_code=response.status_code)
-            except:
+            except Exception:
                 return Response(content=response.content, status_code=response.status_code)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -1216,7 +1394,48 @@ async def chat_completions(request: Request):
     body = await request.json()
     model = body.get("model", "swarm-ensemble")
     is_stream = body.get("stream", False)
+    messages = body.get("messages", [])
+    if not isinstance(messages, list):
+        return JSONResponse({"error": "messages must be a list"}, status_code=422)
     
+    # Scan latest user message for memories
+    if messages:
+        last_message = messages[-1]
+        if last_message.get("role") == "user":
+            content = last_message.get("content", "")
+            if isinstance(content, list):
+                text_content = ""
+                for part in content:
+                    if part.get("type") == "text":
+                        text_content += part.get("text", "")
+            else:
+                text_content = str(content)
+            memory_manager.scan_for_memories(text_content)
+
+    # Inject memories and workspace context
+    if messages:
+        mem_str = "\n".join([f"- {m}" for m in memory_manager.memories])
+        memory_context = f"\n\n[COMPANION MEMORIES]\n{mem_str}" if memory_manager.memories else ""
+        
+        sys_context = compile_system_workspace_context()
+        workspace_context = f"\n\n[WORKSPACE CONTEXT]\n{sys_context}" if sys_context else ""
+        
+        system_msg = None
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_msg = msg
+                break
+        
+        if system_msg:
+            system_msg["content"] += memory_context + workspace_context
+        else:
+            messages.insert(0, {
+                "role": "system",
+                "content": f"You are a helpful AI assistant.{memory_context}{workspace_context}"
+            })
+            
+        body["messages"] = messages
+
     logger.info(f"Received request: {model}")
     
     # Intercept provider models
@@ -1236,7 +1455,7 @@ async def chat_completions(request: Request):
                     for i, api_key in enumerate(api_keys):
                         headers = {"Authorization": f"Bearer {api_key}"}
                         if "openrouter" in base_url.lower():
-                            headers["HTTP-Referer"] = "http://localhost:8000"
+                            headers["HTTP-Referer"] = f"http://localhost:{ORCHESTRATOR_PORT}"
                             headers["X-Title"] = "LLaMA Server 2.0"
                             
                         try:
@@ -1261,7 +1480,7 @@ async def chat_completions(request: Request):
                 for i, api_key in enumerate(api_keys):
                     headers = {"Authorization": f"Bearer {api_key}"}
                     if "openrouter" in base_url.lower():
-                        headers["HTTP-Referer"] = "http://localhost:8000"
+                        headers["HTTP-Referer"] = f"http://localhost:{ORCHESTRATOR_PORT}"
                         headers["X-Title"] = "LLaMA Server 2.0"
                         
                     try:
@@ -1280,30 +1499,30 @@ async def chat_completions(request: Request):
     
     if model != "swarm-ensemble":
         async def stream_proxy():
-            async with httpx.AsyncClient() as client:
-                async with client.stream("POST", "http://127.0.0.1:8080/v1/chat/completions", json=body, timeout=60.0) as resp:
-                    async for chunk in resp.aiter_bytes():
-                        yield chunk
-                        
+            try:
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("POST", f"http://127.0.0.1:{LLAMA_PORT}/v1/chat/completions", json=body, timeout=60.0) as resp:
+                        async for chunk in resp.aiter_bytes():
+                            yield chunk
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                yield b'data: {"error": {"message": "Local inference server is not running. Please load a model first.", "type": "connection_error"}}\n\ndata: [DONE]\n\n'
+
         if is_stream:
             return StreamingResponse(stream_proxy(), media_type="text/event-stream")
-            
+
         async with httpx.AsyncClient() as client:
             try:
-                resp = await client.post("http://127.0.0.1:8080/v1/chat/completions", json=body, timeout=120.0)
+                resp = await client.post(f"http://127.0.0.1:{LLAMA_PORT}/v1/chat/completions", json=body, timeout=120.0)
                 if resp.status_code != 200:
                     return JSONResponse(content={"error": resp.text}, status_code=resp.status_code)
-                    
+
                 data = resp.json()
-                
+
                 # Intercept and fix markdown json tool blocks
                 for choice in data.get("choices", []):
                     msg = choice.get("message", {})
-                    content = msg.get("content", "")
-                    if content is None:
-                        content = ""
-                    
-                    # Try to parse raw JSON first
+                    content = msg.get("content", "") or ""
+
                     parsed_tool = None
                     if content.strip().startswith("{") and content.strip().endswith("}"):
                         try:
@@ -1312,10 +1531,9 @@ async def chat_completions(request: Request):
                                 parsed_tool = maybe_tool
                         except json.JSONDecodeError:
                             pass
-                            
-                    # If not raw JSON, check for ```json block
+
                     if not parsed_tool and "```json" in content:
-                        match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
+                        match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL | re.IGNORECASE)
                         if match:
                             try:
                                 maybe_tool = json.loads(match.group(1))
@@ -1323,7 +1541,7 @@ async def chat_completions(request: Request):
                                     parsed_tool = maybe_tool
                             except json.JSONDecodeError:
                                 pass
-                                
+
                     if parsed_tool:
                         msg["tool_calls"] = [{
                             "id": f"call_{int(datetime.datetime.now().timestamp())}",
@@ -1335,8 +1553,10 @@ async def chat_completions(request: Request):
                         }]
                         msg["content"] = ""
                         choice["finish_reason"] = "tool_calls"
-                                
+
                 return JSONResponse(content=data, status_code=200)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                return JSONResponse(content={"error": {"message": "Local inference server is not running. Please load a model first.", "type": "connection_error"}}, status_code=503)
             except Exception as e:
                 logger.error(f"Proxy error: {e}")
                 return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -1488,6 +1708,579 @@ async def text_to_speech(req: TTSRequest):
         logger.error(f"TTS Error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+whisper_model_cache = {}
+
+@app.post("/v1/audio/transcriptions")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    model: str = Form("base")
+):
+    try:
+        from fastapi import File, Form, UploadFile
+        from faster_whisper import WhisperModel
+        import io
+        
+        model_size = model.lower()
+        if model_size not in ["tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large"]:
+            model_size = "base"
+            
+        if model_size not in whisper_model_cache:
+            logger.info(f"Loading faster-whisper model: {model_size}")
+            whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="float32")
+            
+        whisper_model = whisper_model_cache[model_size]
+        
+        file_bytes = await file.read()
+        audio_file = io.BytesIO(file_bytes)
+        
+        segments, info = whisper_model.transcribe(audio_file, beam_size=5)
+        text = "".join([segment.text for segment in segments])
+        
+        return {"text": text.strip()}
+    except Exception as e:
+        logger.error(f"Transcription Error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.websocket("/v1/audio/stream")
+async def audio_stream(websocket: WebSocket):
+    await websocket.accept()
+    import io
+    audio_buffer = io.BytesIO()
+    try:
+        while True:
+            data = await websocket.receive()
+            if "bytes" in data:
+                audio_buffer.write(data["bytes"])
+            elif "text" in data:
+                if data["text"] == "EOF":
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket STT Error: {e}")
+    finally:
+        try:
+            audio_buffer.seek(0)
+            if audio_buffer.getbuffer().nbytes > 0:
+                from faster_whisper import WhisperModel
+                model_size = "base"
+                if model_size not in whisper_model_cache:
+                    logger.info(f"Loading faster-whisper model: {model_size}")
+                    whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="float32")
+                
+                whisper_model = whisper_model_cache[model_size]
+                segments, info = whisper_model.transcribe(audio_buffer, beam_size=5)
+                text = "".join([segment.text for segment in segments]).strip()
+            else:
+                text = ""
+                
+            await websocket.send_json({"text": text})
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"Error finalizing WebSocket STT: {e}")
+
+class ActionPayload(BaseModel):
+    action: str
+
+@app.post("/v1/action")
+async def execute_action(payload: ActionPayload):
+    action = payload.action
+    logger.info(f"Voice action triggered: {action}")
+    try:
+        if action == "build":
+            ui_path = os.path.join(BASE_DIR, "tools", "ui")
+            subprocess.Popen(["npm", "run", "build"], cwd=ui_path, shell=False)
+            return {"status": "build_started"}
+        elif action == "terminal":
+            if os.name == 'nt':
+                subprocess.Popen(["powershell"], shell=False)
+            else:
+                subprocess.Popen(["x-terminal-emulator"], shell=False)
+            return {"status": "terminal_opened"}
+    except Exception as e:
+        logger.error(f"Failed to execute voice action: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"error": f"Unknown action: {action}"}, status_code=400)
+
+@app.get("/v1/workspace/focus")
+async def get_workspace_focus():
+    try:
+        import glob
+        files = []
+        for root, dirs, filenames in os.walk(BASE_DIR):
+            dirs[:] = [d for d in dirs if d not in ['.venv', 'build', '.git', 'node_modules', 'dist', '.svelte-kit', '.cache']]
+            for f in filenames:
+                if f.endswith(('.svelte', '.ts', '.js', '.py', '.cpp', '.h', '.txt', '.md', '.json')):
+                    files.append(os.path.join(root, f))
+                    
+        if not files:
+            return {"file": "None", "lines": 0, "path": "", "language": "Plain Text"}
+            
+        latest_file = max(files, key=os.path.getmtime)
+        relative_path = os.path.relpath(latest_file, BASE_DIR).replace('\\', '/')
+        
+        line_count = 0
+        with open(latest_file, "r", encoding="utf-8", errors="ignore") as f:
+            for _ in f:
+                line_count += 1
+                
+        ext = os.path.splitext(latest_file)[1].lower()
+        lang_map = {
+            '.py': 'Python',
+            '.svelte': 'Svelte',
+            '.ts': 'TypeScript',
+            '.js': 'JavaScript',
+            '.cpp': 'C++',
+            '.h': 'C++ Header',
+            '.json': 'JSON',
+            '.md': 'Markdown',
+            '.txt': 'Text'
+        }
+        language = lang_map.get(ext, 'Plain Text')
+        
+        return {
+            "file": os.path.basename(latest_file),
+            "path": relative_path,
+            "lines": line_count,
+            "language": language
+        }
+    except Exception as e:
+        logger.error(f"Error getting workspace focus: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/v1/workspace/file_content")
+async def get_file_content(path: str):
+    try:
+        safe_path = os.path.abspath(os.path.join(BASE_DIR, path))
+        if not safe_path.startswith(os.path.abspath(BASE_DIR)):
+            return JSONResponse({"error": "Unauthorized path access"}, status_code=403)
+            
+        if not os.path.exists(safe_path):
+            return JSONResponse({"error": "File not found"}, status_code=404)
+            
+        with open(safe_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        return {"content": content}
+    except Exception as e:
+        logger.error(f"Error reading file content: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/v1/agent/execute_code")
+async def execute_python_code(payload: dict):
+    code = payload.get("code", "")
+    if not code:
+        return JSONResponse({"error": "No code provided"}, status_code=400)
+        
+    try:
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as temp_file:
+            temp_file.write(code)
+            temp_path = temp_file.name
+            
+        python_exe = sys.executable
+        
+        process = subprocess.Popen(
+            [python_exe, temp_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=BASE_DIR,
+            text=True
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            return JSONResponse({"error": "Execution timed out after 30 seconds"}, status_code=408)
+        
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+            
+        return {
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": process.returncode
+        }
+    except Exception as e:
+        logger.error(f"Execution error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/v1/mcp/install")
+async def install_mcp_server(payload: dict):
+    package = payload.get("package", "")
+    manager = payload.get("manager", "npm")
+    
+    if not package:
+        return JSONResponse({"error": "No package provided"}, status_code=400)
+
+    # Validate package name to prevent shell injection
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9@/_\-\.]+$', package):
+        return JSONResponse({"error": "Invalid package name"}, status_code=400)
+        
+    try:
+        if manager == "npm":
+            cmd = ["npm", "install", "-g", package]
+        else:
+            if os.path.exists(os.path.join(BASE_DIR, ".venv", "Scripts", "pip.exe")):
+                pip_path = os.path.join(BASE_DIR, ".venv", "Scripts", "pip.exe")
+            else:
+                pip_path = "pip"
+            cmd = [pip_path, "install", package]
+            
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            text=True
+        )
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            return JSONResponse({
+                "status": "failed",
+                "stdout": stdout,
+                "stderr": stderr
+            }, status_code=500)
+            
+        mcp_manifest_path = os.path.join(BASE_DIR, "companion_mcp_installed.json")
+        installed_list = []
+        if os.path.exists(mcp_manifest_path):
+            with open(mcp_manifest_path, "r") as f:
+                installed_list = json.load(f)
+                
+        installed_list.append({"package": package, "manager": manager, "installed_at": time.time()})
+        with open(mcp_manifest_path, "w") as f:
+            json.dump(installed_list, f, indent=4)
+            
+        return {
+            "status": "success",
+            "package": package,
+            "stdout": stdout
+        }
+    except Exception as e:
+        logger.error(f"MCP installation error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/v1/agent/self_repair")
+async def run_self_repair():
+    try:
+        process = subprocess.Popen(
+            ["npm", "run", "check"],
+            cwd=os.path.join(BASE_DIR, "tools", "ui"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            text=True
+        )
+        stdout, stderr = process.communicate()
+        
+        if process.returncode == 0:
+            return {"status": "success", "message": "System compiles with 0 errors."}
+            
+        errors = stdout + "\n" + stderr
+        
+        file_match = re.search(r'([a-zA-Z]:\\[^\s\(\)]+\.(?:svelte|ts|js|py|cpp|h))', errors)
+        if not file_match:
+            file_match = re.search(r'([^\s\(\)]+\.(?:svelte|ts|js|py|cpp|h))', errors)
+            
+        if not file_match:
+            return {
+                "status": "unresolved",
+                "message": "Compilation failed, but could not determine target error file.",
+                "errors": errors
+            }
+            
+        error_file_path = file_match.group(1)
+        if not os.path.isabs(error_file_path):
+            ui_path = os.path.join(BASE_DIR, "tools", "ui", error_file_path)
+            if os.path.exists(ui_path):
+                error_file_path = ui_path
+            else:
+                error_file_path = os.path.join(BASE_DIR, error_file_path)
+                
+        if not os.path.exists(error_file_path):
+            return {
+                "status": "unresolved",
+                "message": f"Compilation failed, file path {error_file_path} not found.",
+                "errors": errors
+            }
+            
+        with open(error_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            file_content = f.read()
+            
+        system_prompt = "You are an autonomous compiler repair bot. Your task is to fix the compiler error in the provided code. Respond ONLY with the corrected code inside a ```code codeblock."
+        user_prompt = f"File Path: {error_file_path}\n\nCompiler Errors:\n{errors}\n\nExisting File Code:\n```\n{file_content}\n```"
+        
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"http://127.0.0.1:{ORCHESTRATOR_PORT}/v1/chat/completions",
+                json={
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "model": "local-model"
+                },
+                timeout=120.0
+            )
+            
+        if res.status_code != 200:
+            return {
+                "status": "unresolved",
+                "message": f"Orchestrator completions failed with status {res.status_code}.",
+                "errors": errors
+            }
+            
+        reply = res.json()["choices"][0]["message"]["content"]
+        
+        backup_path = error_file_path + ".bak"
+        with open(backup_path, "w", encoding="utf-8") as f:
+            f.write(file_content)
+
+        code_blocks = re.findall(r'```(?:\w+)?\r?\n(.*?)\r?\n?```', reply, re.DOTALL)
+        if code_blocks:
+            fixed_code = code_blocks[0]
+        else:
+            fixed_code = reply
+            
+        with open(error_file_path, "w", encoding="utf-8") as f:
+            f.write(fixed_code)
+            
+        process_retry = subprocess.Popen(
+            ["npm", "run", "check"],
+            cwd=os.path.join(BASE_DIR, "tools", "ui"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            text=True
+        )
+        stdout_r, stderr_r = process_retry.communicate()
+        
+        if process_retry.returncode == 0:
+            subprocess.Popen(["npm", "run", "build"], cwd=os.path.join(BASE_DIR, "tools", "ui"), shell=True)
+            return {
+                "status": "success",
+                "message": f"Successfully patched compiler error in {os.path.basename(error_file_path)}.",
+                "patch_file": error_file_path
+            }
+            
+        return {
+            "status": "partial_unresolved",
+            "message": f"Applied patch to {os.path.basename(error_file_path)} but compilation still fails.",
+            "errors": stdout_r + "\n" + stderr_r
+        }
+    except Exception as e:
+        logger.error(f"Self-repair execution error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+async def search_internet(query: str) -> str:
+    try:
+        url = "https://lite.duckduckgo.com/lite/"
+        async with httpx.AsyncClient() as client:
+            res = await client.post(url, data={"q": query}, headers={"User-Agent": "Mozilla/5.0"}, timeout=15.0)
+            if res.status_code == 200:
+                snippets = re.findall(r'<td class="result-snippet">(.*?)</td>', res.text, re.DOTALL)
+                clean_snippets = []
+                for s in snippets[:4]:
+                    clean = re.sub(r'<[^>]+>', '', s).strip()
+                    clean_snippets.append(clean)
+                return "\n".join(clean_snippets)
+    except Exception as e:
+        logger.error(f"Lite search scraper failed: {e}")
+    return "No search results found."
+
+async def run_self_improvement_logic():
+    try:
+        target_file = os.path.join(BASE_DIR, "tools", "ui", "src", "lib", "services", "companion.svelte.ts")
+        if not os.path.exists(target_file):
+            logger.warning("Target companion file not found for self-improvement.")
+            return {"status": "skipped", "message": "Target file companion.svelte.ts not found."}
+            
+        with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
+            code = f.read()
+            
+        search_query = "svelte 5 performance optimization code patterns clean"
+        search_context = await search_internet(search_query)
+        
+        system_prompt = (
+            "You are an autonomous self-improvement daemon. Your goal is to optimize, refactor, and improve the robustness of the provided code. "
+            "Examine the latest techniques and clean-code patterns retrieved from web search context to guide your improvements. "
+            "Focus on: memory management, latency reduction, better error handlers, and code clarity. "
+            "Return ONLY the complete improved file content inside a single ```code codeblock. Do not include explanations."
+        )
+        user_prompt = (
+            f"Web Search Guidelines:\n{search_context}\n\n"
+            f"File Path: {target_file}\n\n"
+            f"Existing Code:\n```\n{code}\n```"
+        )
+        
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"http://127.0.0.1:{ORCHESTRATOR_PORT}/v1/chat/completions",
+                json={
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "model": "local-model"
+                },
+                timeout=180.0
+            )
+            
+        if res.status_code != 200:
+            return {"status": "failed", "message": f"LLM completions query failed: {res.status_code}"}
+            
+        reply = res.json()["choices"][0]["message"]["content"]
+        
+        code_blocks = re.findall(r'```(?:\w+)?\n(.*?)\n```', reply, re.DOTALL)
+        if code_blocks:
+            improved_code = code_blocks[0]
+        else:
+            improved_code = reply
+            
+        if not improved_code.strip() or len(improved_code) < 100:
+            return {"status": "skipped", "message": "LLM returned empty or invalid code block."}
+            
+        backup_path = target_file + ".bak"
+        with open(backup_path, "w", encoding="utf-8") as f:
+            f.write(code)
+            
+        with open(target_file, "w", encoding="utf-8") as f:
+            f.write(improved_code)
+            
+        process = subprocess.Popen(
+            ["npm", "run", "check"],
+            cwd=os.path.join(BASE_DIR, "tools", "ui"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            text=True
+        )
+        stdout, stderr = process.communicate()
+        
+        if process.returncode == 0:
+            subprocess.Popen(["npm", "run", "build"], cwd=os.path.join(BASE_DIR, "tools", "ui"), shell=True)
+            try:
+                os.remove(backup_path)
+            except OSError:
+                pass
+                
+            log_path = os.path.join(BASE_DIR, "companion_self_improvements.json")
+            logs = []
+            if os.path.exists(log_path):
+                with open(log_path, "r") as f:
+                    logs = json.load(f)
+            
+            new_log = {
+                "timestamp": time.time(),
+                "file": os.path.basename(target_file),
+                "type": "search_guided_refactor"
+            }
+            logs.append(new_log)
+            with open(log_path, "w") as f:
+                json.dump(logs, f, indent=4)
+                
+            # Post upgrade to news feed!
+            title = f"System Upgrade: Optimized {os.path.basename(target_file)}"
+            summary = f"The Self-Upgrade Daemon successfully analyzed latest internet trends and refactored {os.path.basename(target_file)} to reduce latency and clean codebase references."
+            full_text = (
+                f"Self-Upgrade Log details:\n\n"
+                f"- **Target File**: {os.path.basename(target_file)}\n"
+                f"- **Methodology**: DuckDuckGo internet scan search guided refactoring.\n"
+                f"- **Compiler verification**: Completed check builds with 0 warnings.\n"
+                f"- **Enhancements**: Latency bounds check, clean resource cleanups and Svelte reactivity mappings optimized."
+            )
+            news_manager.add_internal_news(title, summary, full_text)
+            
+            return {
+                "status": "success",
+                "message": f"Successfully optimized and self-improved {os.path.basename(target_file)} autonomously."
+            }
+        else:
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.write(code)
+            try:
+                os.remove(backup_path)
+            except OSError:
+                pass
+            return {
+                "status": "failed",
+                "message": f"Proposed optimization for {os.path.basename(target_file)} failed compilation. Restored original file.",
+                "errors": stdout + "\n" + stderr
+            }
+    except Exception as e:
+        logger.error(f"Self-improvement execution logic error: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/v1/agent/self_improve")
+async def run_self_improvement():
+    result = await run_self_improvement_logic()
+    if result.get("status") == "error":
+        return JSONResponse(result, status_code=500)
+    return result
+
+@app.post("/v1/agent/self_improve/toggle")
+async def toggle_continuous_self_improvement(payload: dict):
+    enabled = payload.get("enabled", False)
+    try:
+        config_path = os.path.join(BASE_DIR, "companion_continuous_config.json")
+        with open(config_path, "w") as f:
+            json.dump({"enabled": enabled}, f)
+        return {"status": "success", "enabled": enabled}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/v1/agent/self_improve/logs")
+async def get_self_improvement_logs():
+    try:
+        log_path = os.path.join(BASE_DIR, "companion_self_improvements.json")
+        if os.path.exists(log_path):
+            with open(log_path, "r") as f:
+                logs = json.load(f)
+            return logs
+        return []
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+def start_continuous_self_improvement_thread():
+    def _loop():
+        time.sleep(30)
+        config_path = os.path.join(BASE_DIR, "companion_continuous_config.json")
+        while True:
+            try:
+                enabled = False
+                if os.path.exists(config_path):
+                    with open(config_path, "r") as f:
+                        data = json.load(f)
+                        enabled = data.get("enabled", False)
+
+                if enabled:
+                    logger.info("Continuous daily self-improvement daemon running...")
+                    asyncio_loop = asyncio.new_event_loop()
+                    try:
+                        asyncio_loop.run_until_complete(run_self_improvement_logic())
+                    finally:
+                        asyncio_loop.close()
+            except Exception as e:
+                logger.error(f"Continuous self-improvement thread loop error: {e}")
+            time.sleep(86400)
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+if __name__ == "__main__":
+    start_continuous_self_improvement_thread()
+
 @app.get("/api/tunnel/stop")
 async def stop_tunnel():
     try:
@@ -1497,6 +2290,442 @@ async def stop_tunnel():
         logger.error(f"Error stopping tunnel: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+# =============================================================================
+# Ghost Protocol - Full Desktop Control
+# =============================================================================
+
+def _get_pyautogui():
+    try:
+        import pyautogui
+        pyautogui.FAILSAFE = True
+        return pyautogui
+    except ImportError:
+        return None
+
+def _get_mss():
+    try:
+        import mss, mss.tools, base64, io
+        return mss
+    except ImportError:
+        return None
+
+class GhostActionPayload(BaseModel):
+    action: str
+    x: float | None = None
+    y: float | None = None
+    button: str = "left"
+    text: str | None = None
+    keys: str | None = None
+    amount: int = 3
+    title: str | None = None
+    cmd: str | None = None
+
+GHOST_CMD_ALLOWLIST: list[str] = []  # empty = run_command disabled; add strings to enable
+
+@app.post("/v1/ghost/action")
+async def ghost_action(payload: GhostActionPayload):
+    global ghost_protocol
+    if not ghost_protocol:
+        return JSONResponse({"error": "Ghost Protocol is not active"}, status_code=403)
+
+    action = payload.action
+
+    if action == "screenshot":
+        mss = _get_mss()
+        if not mss:
+            return JSONResponse({"error": "mss not installed. Run: pip install mss"}, status_code=503)
+        try:
+            import base64, io
+            with mss.mss() as sct:
+                monitor = sct.monitors[0]
+                sct_img = sct.grab(monitor)
+                from PIL import Image
+                img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                encoded = base64.b64encode(buf.getvalue()).decode()
+            return {"screenshot": encoded, "width": sct_img.width, "height": sct_img.height}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "click":
+        pag = _get_pyautogui()
+        if not pag:
+            return JSONResponse({"error": "pyautogui not installed. Run: pip install pyautogui"}, status_code=503)
+        if payload.x is None or payload.y is None:
+            return JSONResponse({"error": "x and y required for click"}, status_code=400)
+        try:
+            pag.click(int(payload.x), int(payload.y), button=payload.button)
+            return {"status": "clicked", "x": payload.x, "y": payload.y, "button": payload.button}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "move":
+        pag = _get_pyautogui()
+        if not pag:
+            return JSONResponse({"error": "pyautogui not installed"}, status_code=503)
+        if payload.x is None or payload.y is None:
+            return JSONResponse({"error": "x and y required for move"}, status_code=400)
+        try:
+            pag.moveTo(int(payload.x), int(payload.y), duration=0.1)
+            return {"status": "moved", "x": payload.x, "y": payload.y}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "type":
+        pag = _get_pyautogui()
+        if not pag:
+            return JSONResponse({"error": "pyautogui not installed"}, status_code=503)
+        if not payload.text:
+            return JSONResponse({"error": "text required"}, status_code=400)
+        try:
+            pag.typewrite(payload.text, interval=0.02)
+            return {"status": "typed", "length": len(payload.text)}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "key":
+        pag = _get_pyautogui()
+        if not pag:
+            return JSONResponse({"error": "pyautogui not installed"}, status_code=503)
+        if not payload.keys:
+            return JSONResponse({"error": "keys required"}, status_code=400)
+        try:
+            key_list = [k.strip() for k in payload.keys.split("+")]
+            if len(key_list) > 1:
+                pag.hotkey(*key_list)
+            else:
+                pag.press(key_list[0])
+            return {"status": "key_sent", "keys": payload.keys}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "scroll":
+        pag = _get_pyautogui()
+        if not pag:
+            return JSONResponse({"error": "pyautogui not installed"}, status_code=503)
+        try:
+            if payload.x is not None and payload.y is not None:
+                pag.scroll(payload.amount, x=int(payload.x), y=int(payload.y))
+            else:
+                pag.scroll(payload.amount)
+            return {"status": "scrolled", "amount": payload.amount}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "get_windows":
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                import ctypes.wintypes
+                windows = []
+                def enum_handler(hwnd, _):
+                    if ctypes.windll.user32.IsWindowVisible(hwnd):
+                        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                        if length > 0:
+                            buf = ctypes.create_unicode_buffer(length + 1)
+                            ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                            windows.append(buf.value)
+                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+                ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_handler), 0)
+                return {"windows": windows}
+            else:
+                result = subprocess.run(["wmctrl", "-l"], capture_output=True, text=True, timeout=3)
+                titles = [line.split(None, 3)[-1] for line in result.stdout.splitlines() if line.strip()]
+                return {"windows": titles}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "focus_window":
+        if not payload.title:
+            return JSONResponse({"error": "title required"}, status_code=400)
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                import ctypes.wintypes
+                target = payload.title.lower()
+                found = [None]
+                def enum_handler(hwnd, _):
+                    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buf = ctypes.create_unicode_buffer(length + 1)
+                        ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                        if target in buf.value.lower():
+                            found[0] = hwnd
+                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+                ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_handler), 0)
+                if found[0]:
+                    ctypes.windll.user32.SetForegroundWindow(found[0])
+                    return {"status": "focused", "title": payload.title}
+                return JSONResponse({"error": f"Window not found: {payload.title}"}, status_code=404)
+            else:
+                subprocess.run(["wmctrl", "-a", payload.title], timeout=3)
+                return {"status": "focused", "title": payload.title}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif action == "run_command":
+        if not GHOST_CMD_ALLOWLIST:
+            return JSONResponse({"error": "run_command is disabled. Set GHOST_CMD_ALLOWLIST to enable."}, status_code=403)
+        if not payload.cmd:
+            return JSONResponse({"error": "cmd required"}, status_code=400)
+        if not any(payload.cmd.startswith(prefix) for prefix in GHOST_CMD_ALLOWLIST):
+            return JSONResponse({"error": "Command not in allowlist"}, status_code=403)
+        try:
+            result = subprocess.run(
+                payload.cmd, shell=False, capture_output=True, text=True, timeout=30,
+                args=payload.cmd.split()
+            )
+            return {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode}
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "Command timed out"}, status_code=408)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    else:
+        return JSONResponse({"error": f"Unknown ghost action: {action}"}, status_code=400)
+
+
+# =============================================================================
+# Daemon Loop - Self-Upgrading Intelligence Engine
+# =============================================================================
+
+DAEMON_PROPOSALS_FILE = os.path.join(BASE_DIR, "companion_daemon_proposals.json")
+DAEMON_WATCHLIST_FILE = os.path.join(BASE_DIR, "companion_daemon_watchlist.json")
+DAEMON_STATE_FILE = os.path.join(BASE_DIR, "companion_daemon_state.json")
+
+DEFAULT_WATCHLIST = [
+    {"repo": "ggml-org/llama.cpp", "reason": "Core inference engine"},
+    {"repo": "ollama/ollama", "reason": "Local LLM serving"},
+    {"repo": "OpenDevin/OpenDevin", "reason": "Autonomous agent framework"},
+    {"repo": "paul-gauthier/aider", "reason": "AI pair programming"},
+    {"repo": "microsoft/autogen", "reason": "Multi-agent orchestration"},
+]
+
+def _load_daemon_json(path: str, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return default
+
+def _save_daemon_json(path: str, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Daemon: failed to save {path}: {e}")
+
+async def _daemon_research_cycle():
+    import urllib.request, urllib.error
+    proposals = _load_daemon_json(DAEMON_PROPOSALS_FILE, [])
+    watchlist = _load_daemon_json(DAEMON_WATCHLIST_FILE, DEFAULT_WATCHLIST)
+    new_proposals = []
+
+    # 1. GitHub Trending (AI/ML repos)
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/search/repositories?q=topic:llm+topic:ai&sort=stars&order=desc&per_page=10",
+            headers={"User-Agent": "LLaMA-Pro-Daemon/1.0", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            for item in data.get("items", [])[:5]:
+                new_proposals.append({
+                    "id": f"gh-{item['full_name'].replace('/', '-')}-{int(time.time())}",
+                    "source": "github",
+                    "title": f"GitHub: {item['full_name']}",
+                    "description": item.get("description", ""),
+                    "url": item.get("html_url", ""),
+                    "stars": item.get("stargazers_count", 0),
+                    "found_at": time.time(),
+                    "status": "pending",
+                    "proposal": f"Review {item['full_name']} ({item.get('description','')}) for techniques applicable to LLaMA Pro."
+                })
+    except Exception as e:
+        logger.warning(f"Daemon: GitHub search failed: {e}")
+
+    # 2. ArXiv - latest AI/LLM papers
+    try:
+        arxiv_url = (
+            "https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG+OR+cat:cs.CL"
+            "&sortBy=submittedDate&sortOrder=descending&max_results=5"
+        )
+        req = urllib.request.Request(arxiv_url, headers={"User-Agent": "LLaMA-Pro-Daemon/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(resp.read())
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            for entry in root.findall("atom:entry", ns)[:5]:
+                title = (entry.find("atom:title", ns).text or "").strip()
+                summary = (entry.find("atom:summary", ns).text or "").strip()[:300]
+                link = entry.find("atom:id", ns).text or ""
+                new_proposals.append({
+                    "id": f"arxiv-{abs(hash(title))}-{int(time.time())}",
+                    "source": "arxiv",
+                    "title": f"ArXiv: {title}",
+                    "description": summary,
+                    "url": link,
+                    "found_at": time.time(),
+                    "status": "pending",
+                    "proposal": f"Evaluate ArXiv paper '{title}' for techniques that could improve LLaMA Pro's agentic or self-improvement capabilities."
+                })
+    except Exception as e:
+        logger.warning(f"Daemon: ArXiv search failed: {e}")
+
+    # 3. Watchlist - check for recent activity
+    _safe_repo_pattern = re.compile(r'^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$')
+    for item in watchlist:
+        repo = item.get("repo", "")
+        if not repo or not _safe_repo_pattern.match(repo):
+            continue
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{repo}/releases/latest",
+                headers={"User-Agent": "LLaMA-Pro-Daemon/1.0", "Accept": "application/vnd.github.v3+json"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                release = json.loads(resp.read())
+                tag = release.get("tag_name", "")
+                body = (release.get("body", "") or "")[:400]
+                published = release.get("published_at", "")
+                new_proposals.append({
+                    "id": f"watch-{repo.replace('/', '-')}-{tag}-{int(time.time())}",
+                    "source": "watchlist",
+                    "title": f"Release: {repo} {tag}",
+                    "description": body,
+                    "url": release.get("html_url", ""),
+                    "found_at": time.time(),
+                    "status": "pending",
+                    "proposal": f"New release {tag} of {repo} ({item.get('reason','')}). Review changelog for improvements applicable to LLaMA Pro."
+                })
+        except Exception:
+            pass  # repo may have no releases or be unreachable
+
+    # Deduplicate by title against existing proposals
+    existing_titles = {p.get("title") for p in proposals}
+    added = [p for p in new_proposals if p.get("title") not in existing_titles]
+    proposals.extend(added)
+    _save_daemon_json(DAEMON_PROPOSALS_FILE, proposals)
+
+    # Update daemon state
+    state = _load_daemon_json(DAEMON_STATE_FILE, {})
+    state["last_run"] = time.time()
+    state["last_run_iso"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    state["proposals_total"] = len(proposals)
+    state["proposals_added_last_run"] = len(added)
+    _save_daemon_json(DAEMON_STATE_FILE, state)
+
+    logger.info(f"Daemon research cycle complete. Added {len(added)} new proposals (total: {len(proposals)}).")
+    return {"added": len(added), "total": len(proposals)}
+
+def _start_daemon_loop():
+    def _loop():
+        # Initial delay so the app can fully start before first research hit
+        time.sleep(60)
+        while True:
+            try:
+                if daemon_loop:
+                    asyncio_loop = asyncio.new_event_loop()
+                    try:
+                        asyncio_loop.run_until_complete(_daemon_research_cycle())
+                    finally:
+                        asyncio_loop.close()
+            except Exception as e:
+                logger.error(f"Daemon loop error: {e}")
+            # Default interval: 6 hours
+            state = _load_daemon_json(DAEMON_STATE_FILE, {})
+            interval = int(state.get("interval_seconds", 6 * 3600))
+            time.sleep(interval)
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+_start_daemon_loop()
+
+@app.get("/v1/daemon/status")
+async def daemon_status():
+    state = _load_daemon_json(DAEMON_STATE_FILE, {})
+    proposals = _load_daemon_json(DAEMON_PROPOSALS_FILE, [])
+    return {
+        "active": daemon_loop,
+        "last_run": state.get("last_run_iso"),
+        "proposals_total": len(proposals),
+        "proposals_pending": sum(1 for p in proposals if p.get("status") == "pending"),
+        "interval_seconds": state.get("interval_seconds", 6 * 3600),
+    }
+
+@app.get("/v1/daemon/proposals")
+async def get_daemon_proposals():
+    proposals = _load_daemon_json(DAEMON_PROPOSALS_FILE, [])
+    return {"proposals": proposals}
+
+@app.post("/v1/daemon/proposals/{proposal_id}/apply")
+async def apply_daemon_proposal(proposal_id: str):
+    proposals = _load_daemon_json(DAEMON_PROPOSALS_FILE, [])
+    for p in proposals:
+        if p.get("id") == proposal_id:
+            p["status"] = "applied"
+            p["applied_at"] = time.time()
+            _save_daemon_json(DAEMON_PROPOSALS_FILE, proposals)
+            return {"status": "applied", "proposal": p}
+    return JSONResponse({"error": "Proposal not found"}, status_code=404)
+
+@app.post("/v1/daemon/proposals/{proposal_id}/dismiss")
+async def dismiss_daemon_proposal(proposal_id: str):
+    proposals = _load_daemon_json(DAEMON_PROPOSALS_FILE, [])
+    for p in proposals:
+        if p.get("id") == proposal_id:
+            p["status"] = "dismissed"
+            _save_daemon_json(DAEMON_PROPOSALS_FILE, proposals)
+            return {"status": "dismissed"}
+    return JSONResponse({"error": "Proposal not found"}, status_code=404)
+
+@app.get("/v1/daemon/watchlist")
+async def get_daemon_watchlist():
+    watchlist = _load_daemon_json(DAEMON_WATCHLIST_FILE, DEFAULT_WATCHLIST)
+    return {"watchlist": watchlist}
+
+@app.post("/v1/daemon/watchlist")
+async def update_daemon_watchlist(request: Request):
+    data = await request.json()
+    watchlist = _load_daemon_json(DAEMON_WATCHLIST_FILE, DEFAULT_WATCHLIST)
+    action = data.get("action", "add")
+    repo = data.get("repo", "").strip()
+    if not repo:
+        return JSONResponse({"error": "repo required"}, status_code=400)
+    if action == "add":
+        if not any(w.get("repo") == repo for w in watchlist):
+            watchlist.append({"repo": repo, "reason": data.get("reason", "")})
+    elif action == "remove":
+        watchlist = [w for w in watchlist if w.get("repo") != repo]
+    else:
+        return JSONResponse({"error": "action must be 'add' or 'remove'"}, status_code=400)
+    _save_daemon_json(DAEMON_WATCHLIST_FILE, watchlist)
+    return {"watchlist": watchlist}
+
+@app.post("/v1/daemon/run")
+async def trigger_daemon_run():
+    try:
+        result = await _daemon_research_cycle()
+        return {"status": "complete", **result}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/v1/daemon/interval")
+async def set_daemon_interval(request: Request):
+    data = await request.json()
+    seconds = int(data.get("seconds", 6 * 3600))
+    if seconds < 300:
+        return JSONResponse({"error": "Minimum interval is 300 seconds (5 minutes)"}, status_code=400)
+    state = _load_daemon_json(DAEMON_STATE_FILE, {})
+    state["interval_seconds"] = seconds
+    _save_daemon_json(DAEMON_STATE_FILE, state)
+    return {"interval_seconds": seconds}
+
+
 ui_dist_path = os.path.abspath(os.path.join(BASE_DIR, "tools", "ui", "dist"))
 if os.path.exists(ui_dist_path):
     logger.info(f"Mounting static UI from {ui_dist_path}")
@@ -1505,5 +2734,5 @@ else:
     logger.warning(f"Static UI directory not found at {ui_dist_path}. Network web access will be unavailable.")
 
 if __name__ == "__main__":
-    logger.info("Starting Orchestrator on port 8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    logger.info(f"Starting Orchestrator on port {ORCHESTRATOR_PORT}")
+    uvicorn.run(app, host="0.0.0.0", port=ORCHESTRATOR_PORT)

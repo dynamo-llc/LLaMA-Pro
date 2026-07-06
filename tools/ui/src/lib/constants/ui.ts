@@ -22,11 +22,11 @@ export interface DesktopIconStripItem {
 export const SIDEBAR_ACTIONS_ITEMS: DesktopIconStripItem[] = [
 	{
 		icon: Bot,
-		tooltip: 'HAL 9000',
+		tooltip: 'Agents Chat',
 		route: ROUTES.COMPANION,
 		activeRouteId: '/companion'
 	},
-	{ icon: SquarePen, tooltip: 'New chat', route: ROUTES.NEW_CHAT, keys: ['shift', 'cmd', 'o'] },
+	{ icon: SquarePen, tooltip: 'Models Chat', route: ROUTES.NEW_CHAT, keys: ['shift', 'cmd', 'o'] },
 	{ icon: Search, tooltip: 'Search', keys: ['cmd', 'k'] },
 	{
 		icon: McpLogo,

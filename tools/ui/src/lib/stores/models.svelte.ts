@@ -260,7 +260,7 @@ class ModelsStore {
 		}
 
 		if (isRouterMode() && !this.modelPropsCache.get(modelId)) {
-			this.fetchModelProps(modelId);
+			void this.fetchModelProps(modelId).catch(console.warn); // M3: don't swallow errors silently
 		}
 		const props = this.getModelProps(modelId);
 		return detectThinkingSupport(props?.chat_template ?? '');
@@ -293,7 +293,7 @@ class ModelsStore {
 			return { supported: false, reason: 'No model selected' };
 		}
 		if (isRouterMode() && !this.modelPropsCache.get(modelId)) {
-			this.fetchModelProps(modelId);
+			void this.fetchModelProps(modelId).catch(console.warn); // M3
 		}
 		const props = this.getModelProps(modelId);
 		return detectThinkingSupportWithReason(props?.chat_template ?? '');
@@ -357,6 +357,21 @@ class ModelsStore {
 						try {
 							const companionModel = 'unsloth/Llama-3.2-1B-Instruct-GGUF:Q4_K_M';
 							console.log('[modelsStore] Auto-loading companion model:', companionModel);
+							// If model is not in routerModels, trigger a download first
+							if (!this.routerModels.find(m => m.id === companionModel)) {
+								console.log('[modelsStore] Companion model not found, triggering download...');
+								this.subscribeStatus();
+								const reachedUnloaded = this.waitForStatus(companionModel, ServerModelStatus.UNLOADED);
+								try {
+									await ModelsService.download(companionModel);
+								} catch (downloadErr) {
+									// H4: reject the orphaned waiter so it doesn't hang forever
+									this.rejectStatus(companionModel, downloadErr instanceof Error ? downloadErr : new Error('download failed'));
+									throw downloadErr;
+								}
+								await reachedUnloaded;
+								console.log('[modelsStore] Download finished, now loading...');
+							}
 							await ModelsService.load(companionModel);
 						} catch (err) {
 							console.error('[modelsStore] Failed to auto-load companion model', err);
@@ -391,6 +406,11 @@ class ModelsStore {
 	private buildModelOptions(
 		response: ApiModelListResponse | ApiRouterModelsListResponse
 	): ModelOption[] {
+		if (response.models && response.models.length !== response.data.length) {
+			console.warn(
+				`[ModelsStore] buildModelOptions: data length (${response.data.length}) !== models length (${response.models.length}); details may misalign`
+			);
+		}
 		return response.data.map((item: ApiModelDataEntry, index: number) => {
 			const details = response.models?.[index];
 			const rawCapabilities = Array.isArray(details?.capabilities) ? details?.capabilities : [];
@@ -595,9 +615,10 @@ class ModelsStore {
 			return;
 		}
 
-		// Try loading a favorite model
-		const favorite = this.favoriteModelIds.values().next()?.value;
-		if (favorite) {
+		// L3: use .done to correctly handle empty-string model IDs
+		const iter = this.favoriteModelIds.values().next();
+		if (!iter.done) {
+			const favorite = iter.value;
 			await this.selectModelById(favorite);
 			return;
 		}
@@ -720,18 +741,22 @@ class ModelsStore {
 					const reader = response.body.getReader();
 					let buffer = '';
 
-					while (!signal.aborted) {
-						const { value, done } = await reader.read();
-						if (done) break;
+					try {
+						while (!signal.aborted) {
+							const { value, done } = await reader.read();
+							if (done) break;
 
-						buffer += decoder.decode(value, { stream: true });
+							buffer += decoder.decode(value, { stream: true });
 
-						let boundary = buffer.indexOf(SSE_RECORD_SEPARATOR);
-						while (boundary !== -1) {
-							this.handleStatusRecord(buffer.slice(0, boundary));
-							buffer = buffer.slice(boundary + SSE_RECORD_SEPARATOR.length);
-							boundary = buffer.indexOf(SSE_RECORD_SEPARATOR);
+							let boundary = buffer.indexOf(SSE_RECORD_SEPARATOR);
+							while (boundary !== -1) {
+								this.handleStatusRecord(buffer.slice(0, boundary));
+								buffer = buffer.slice(boundary + SSE_RECORD_SEPARATOR.length);
+								boundary = buffer.indexOf(SSE_RECORD_SEPARATOR);
+							}
 						}
+					} finally {
+						reader.releaseLock(); // H3: always release to avoid stream lock leak
 					}
 				}
 			} catch {

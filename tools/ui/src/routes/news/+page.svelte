@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ExternalLink, X, RefreshCw, Zap, ArrowUpRight } from '@lucide/svelte';
+	import { getBaseUrl } from '$lib/utils/get-base-url';
 	
 	interface NewsItem {
 		id: string;
@@ -24,24 +25,14 @@
 	let internalNews = $derived(newsItems.filter(item => item.is_internal));
 	let externalNews = $derived(newsItems.filter(item => !item.is_internal));
 
-	function getBaseUrl() {
-		let port = '8000';
-		if (typeof window !== 'undefined' && (window as any).orchestratorPort) {
-			port = (window as any).orchestratorPort;
-		}
-		const isDesktop = window.location.protocol === 'app:';
-		const host = (isDesktop || !window.location.hostname || window.location.hostname === '') ? '127.0.0.1' : window.location.hostname;
-		const protocol = isDesktop ? 'http:' : window.location.protocol;
-		return `${protocol}//${host}:${port}`;
-	}
-	
+
 	async function fetchNews(isRefresh = false) {
 		try {
 			if (!isRefresh) loading = true;
 			error = '';
-			const baseUrl = getBaseUrl();
-			const endpoint = isRefresh ? '/api/news/refresh' : '/api/news';
-			const res = await fetch(`${baseUrl}${endpoint}`, { method: isRefresh ? 'POST' : 'GET' });
+			const base = getBaseUrl();
+			const endpoint = isRefresh ? `${base}/api/news/refresh` : `${base}/api/news`;
+			const res = await fetch(endpoint, { method: isRefresh ? 'POST' : 'GET' });
 			if (!res.ok) throw new Error('Failed to fetch news from server.');
 			newsItems = await res.json();
 		} catch (e: any) {

@@ -219,18 +219,18 @@ class MCPResourceStore {
 		this._serverResources.delete(serverName);
 
 		// Also clear cached content for this server's resources
+		const cachedKeysToDelete: string[] = [];
 		for (const [uri, cached] of this._cachedResources) {
-			if (cached.resource.serverName === serverName) {
-				this._cachedResources.delete(uri);
-			}
+			if (cached.resource.serverName === serverName) cachedKeysToDelete.push(uri);
 		}
+		for (const key of cachedKeysToDelete) this._cachedResources.delete(key);
 
 		// Clear subscriptions for this server
+		const subKeysToDelete: string[] = [];
 		for (const [uri, sub] of this._subscriptions) {
-			if (sub.serverName === serverName) {
-				this._subscriptions.delete(uri);
-			}
+			if (sub.serverName === serverName) subKeysToDelete.push(uri);
 		}
+		for (const key of subKeysToDelete) this._subscriptions.delete(key);
 
 		console.log(`[MCPResources][${serverName}] Cleared all resources`);
 	}

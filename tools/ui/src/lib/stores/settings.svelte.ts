@@ -185,10 +185,11 @@ class SettingsStore {
 						this.config[SETTINGS_KEYS.MCP_SERVERS] = JSON.stringify(currentServers);
 						this.saveConfig();
 					}
+					// H9: only mark done after successful completion
+					localStorage.setItem('mcpPresetsInitialized', 'v6');
 				} catch (e) {
 					console.error('Failed to migrate MCP servers:', e);
 				}
-				localStorage.setItem('mcpPresetsInitialized', 'v6');
 			}
 
 			// Default sendOnEnter to false on mobile when the user has no saved preference
@@ -427,7 +428,7 @@ class SettingsStore {
 		}
 
 		this.saveConfig();
-		console.log('User overrides after sync:', Array.from(this.userOverrides));
+		if (import.meta.env.DEV) console.log('User overrides after sync:', Array.from(this.userOverrides)); // L6
 	}
 
 	/**
@@ -551,10 +552,8 @@ class SettingsStore {
 				const mcpServers = JSON.parse(configToExport.mcpServers as string) as Array<
 					Record<string, unknown>
 				>;
-				const safeServers = mcpServers.map((server) => {
-					delete server.headers;
-					return server;
-				});
+				// M10: use destructuring instead of mutating the parsed objects in-place
+				const safeServers = mcpServers.map(({ headers: _, ...rest }) => rest);
 				configToExport.mcpServers = JSON.stringify(safeServers);
 			} catch {
 				// If parsing fails, just exclude the entire mcpServers field

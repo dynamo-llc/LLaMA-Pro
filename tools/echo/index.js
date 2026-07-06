@@ -102,7 +102,7 @@ app.get('/train', (req, res) => {
   }, 400); // Send an update every 400ms
 });
 
-const PORT = 50054;
+const PORT = parseInt(process.env.ECHO_PORT || '50054', 10);
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`Echo Data Server listening on http://127.0.0.1:${PORT}`);
 });

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { spawn, fork, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -15,14 +15,17 @@ let latticaProcess = null;
 let echoProcess = null;
 let rpcServerProcess = null;
 
-function getFreePort(startPort) {
+function getFreePort(startPort, maxPort = 65535) {
   return new Promise((resolve, reject) => {
+    if (startPort > maxPort) {
+      return reject(new Error(`No free port found between start and ${maxPort}`));
+    }
     const server = net.createServer();
     server.listen(startPort, () => {
       const port = server.address().port;
       server.close(() => resolve(port));
     });
-    server.on('error', () => resolve(getFreePort(startPort + 1)));
+    server.on('error', () => getFreePort(startPort + 1, maxPort).then(resolve, reject));
   });
 }
 
@@ -59,56 +62,33 @@ async function startBackendProcesses() {
 
   if (isPackaged) {
     const ext = process.platform === 'win32' ? '.exe' : '';
-    const installedBinDir = path.join(process.resourcesPath, 'bin');
-    const installedServer = path.join(installedBinDir, `llama-server${ext}`);
-    const installedOrchestrator = path.join(process.resourcesPath, `orchestrator${ext}`);
+    const resourcesDir = path.dirname(app.getAppPath());
 
-    if (fs.existsSync(installedServer)) {
-      serverPath = installedServer;
-      orchestratorPath = installedOrchestrator;
-      serverCwd = installedBinDir;
-      orchestratorCwd = process.resourcesPath;
-      latticaCwd = path.join(process.resourcesPath, 'lattica');
-      latticaPath = 'fork';
-      latticaArgs = ['dist/daemon.js'];
-      echoCwd = path.join(process.resourcesPath, 'echo');
-      echoPath = 'fork';
-      echoArgs = ['index.js'];
-    } else {
-      // Dev/unpacked fallback (e.g. running from dist/win-unpacked directly)
-      const ext = process.platform === 'win32' ? '.exe' : '';
-      const devBinDir = path.resolve(path.join(process.resourcesPath, '../../../../build/bin'));
-      const devOrchestratorDir = path.resolve(path.join(process.resourcesPath, '../../../../tools/orchestrator'));
-      
-      serverPath = path.join(devBinDir, `llama-server${ext}`);
-      serverCwd = devBinDir;
-      
-      const compiledOrchestrator = path.join(devOrchestratorDir, `dist/orchestrator${ext}`);
-      const devPython = process.platform === 'win32' 
-        ? path.resolve(path.join(process.resourcesPath, '../../../../.venv/Scripts/python.exe'))
-        : path.resolve(path.join(process.resourcesPath, '../../../../.venv/bin/python'));
-      
-      if (fs.existsSync(compiledOrchestrator)) {
-        orchestratorPath = compiledOrchestrator;
-        orchestratorCwd = path.join(devOrchestratorDir, 'dist');
-      } else {
-        orchestratorPath = devPython;
-        orchestratorArgs = [path.join(devOrchestratorDir, 'main.py')];
-        orchestratorCwd = devOrchestratorDir;
-      }
-      
-      latticaCwd = path.resolve(path.join(process.resourcesPath, '../../../../tools/lattica'));
-      latticaPath = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-      latticaArgs = ['ts-node', 'daemon.ts'];
-      
-      echoCwd = path.resolve(path.join(process.resourcesPath, '../../../../tools/echo'));
-      echoPath = process.platform === 'win32' ? 'node.exe' : 'node';
-      echoArgs = ['index.js'];
-    }
+    // extraResources copies build/bin -> resources/bin, preserving Release/ subdir on Windows
+    const binDirRelease = path.join(resourcesDir, 'bin', 'Release');
+    const binDirFlat = path.join(resourcesDir, 'bin');
+    const installedBinDir = fs.existsSync(path.join(binDirRelease, `llama-server${ext}`))
+      ? binDirRelease
+      : binDirFlat;
+
+    serverPath = path.join(installedBinDir, `llama-server${ext}`);
+    serverCwd = installedBinDir;
+    orchestratorPath = path.join(resourcesDir, `orchestrator${ext}`);
+    orchestratorCwd = resourcesDir;
+    latticaCwd = path.join(resourcesDir, 'lattica');
+    latticaPath = 'fork';
+    latticaArgs = ['dist/daemon.js'];
+    echoCwd = path.join(resourcesDir, 'echo');
+    echoPath = 'fork';
+    echoArgs = ['index.js'];
   } else {
     // Development mode
     const ext = process.platform === 'win32' ? '.exe' : '';
-    const devBinDir = path.resolve(path.join(__dirname, '../../build/bin'));
+    const devBinRoot = path.resolve(path.join(__dirname, '../../build/bin'));
+    // CMake on Windows puts binaries in Release/ subdirectory
+    const devBinDir = fs.existsSync(path.join(devBinRoot, 'Release'))
+      ? path.join(devBinRoot, 'Release')
+      : devBinRoot;
     const devOrchestratorDir = path.resolve(path.join(__dirname, '../orchestrator'));
     const devPython = process.platform === 'win32'
       ? path.resolve(path.join(__dirname, '../../.venv/Scripts/python.exe'))
@@ -117,9 +97,16 @@ async function startBackendProcesses() {
     serverPath = path.join(devBinDir, `llama-server${ext}`);
     serverCwd = devBinDir;
     
-    orchestratorPath = devPython;
-    orchestratorArgs = [path.join(devOrchestratorDir, 'main.py')];
-    orchestratorCwd = devOrchestratorDir;
+    const compiledOrchestrator = path.join(devOrchestratorDir, `dist/orchestrator${ext}`);
+    if (fs.existsSync(compiledOrchestrator)) {
+      orchestratorPath = compiledOrchestrator;
+      orchestratorArgs = [];
+      orchestratorCwd = path.join(devOrchestratorDir, 'dist');
+    } else {
+      orchestratorPath = devPython;
+      orchestratorArgs = [path.join(devOrchestratorDir, 'main.py')];
+      orchestratorCwd = devOrchestratorDir;
+    }
     
     latticaCwd = path.resolve(path.join(__dirname, '../lattica'));
     latticaPath = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -130,11 +117,18 @@ async function startBackendProcesses() {
     echoArgs = ['index.js'];
   }
 
+  global.llamaPort = await getFreePort(8080);
+  global.orchestratorPort = await getFreePort(8000);
+  global.latticaPort = await getFreePort(50053);
+  global.echoPort = await getFreePort(50054);
+
   console.log(`Starting Lattica Daemon from: ${latticaCwd}`);
   if (latticaPath === 'fork') {
-    latticaProcess = fork(path.join(latticaCwd, latticaArgs[0]), [], { cwd: latticaCwd, stdio: 'ignore' });
+    latticaProcess = fork(path.join(latticaCwd, latticaArgs[0]), [], { cwd: latticaCwd, stdio: 'ignore', env: { ...process.env, LATTICA_PORT: String(global.latticaPort) } });
   } else {
-    latticaProcess = spawn(latticaPath, latticaArgs, { cwd: latticaCwd, stdio: 'ignore' });
+    // .cmd files on Windows require shell:true, otherwise spawn throws EINVAL
+    const latticaShell = process.platform === 'win32';
+    latticaProcess = spawn(latticaPath, latticaArgs, { cwd: latticaCwd, stdio: 'ignore', shell: latticaShell, env: { ...process.env, LATTICA_PORT: String(global.latticaPort) } });
   }
   
   latticaProcess.on('error', (err) => {
@@ -143,9 +137,11 @@ async function startBackendProcesses() {
 
   console.log(`Starting Echo Server from: ${echoCwd}`);
   if (echoPath === 'fork') {
-    echoProcess = fork(path.join(echoCwd, echoArgs[0]), [], { cwd: echoCwd, stdio: 'ignore' });
+    echoProcess = fork(path.join(echoCwd, echoArgs[0]), [], { cwd: echoCwd, stdio: 'ignore', env: { ...process.env, ECHO_PORT: String(global.echoPort) } });
   } else {
-    echoProcess = spawn(echoPath, echoArgs, { cwd: echoCwd, stdio: 'ignore' });
+    // Use shell:true on Windows so node.exe resolves correctly from PATH
+    const echoShell = process.platform === 'win32';
+    echoProcess = spawn(echoPath, echoArgs, { cwd: echoCwd, stdio: 'ignore', shell: echoShell, env: { ...process.env, ECHO_PORT: String(global.echoPort) } });
   }
   
   echoProcess.on('error', (err) => {
@@ -154,9 +150,6 @@ async function startBackendProcesses() {
 
   let globalServerPath = serverPath;
   let globalServerCwd = serverCwd;
-
-  global.llamaPort = await getFreePort(8080);
-  global.orchestratorPort = await getFreePort(8000);
 
   // We attach this to global so the IPC handler can use it later
   global.startLlamaServer = async function(useMesh = false) {
@@ -171,7 +164,7 @@ async function startBackendProcesses() {
     if (useMesh) {
       try {
         console.log('Querying Lattica daemon for peers...');
-        const res = await fetch('http://127.0.0.1:50053/peers');
+        const res = await fetch(`http://127.0.0.1:${global.latticaPort}/peers`);
         const data = await res.json();
         if (data && data.peers && data.peers.length > 0) {
           const endpoints = data.peers.map(p => p.endpoint);
@@ -208,7 +201,8 @@ async function startBackendProcesses() {
   orchestratorArgs.push('--port', global.orchestratorPort.toString());
   orchestratorProcess = spawn(orchestratorPath, orchestratorArgs, {
     cwd: orchestratorCwd,
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, LLAMA_PORT: String(global.llamaPort) }
   });
   
   streamLogs(orchestratorProcess, 'orchestrator');
@@ -238,7 +232,7 @@ function stopBackendProcesses() {
   }
   if (orchestratorProcess) {
     // Attempt graceful shutdown first
-    fetch('http://127.0.0.1:8000/api/shutdown', { method: 'POST' })
+    fetch(`http://127.0.0.1:${global.orchestratorPort}/api/shutdown`, { method: 'POST' })
       .catch((err) => console.log('Orchestrator shutdown request failed:', err));
     
     // Forcefully kill the entire process tree synchronously to avoid orphans
@@ -312,7 +306,7 @@ ipcMain.handle('restart-backend', async (_event, options) => {
 });
 
 ipcMain.handle('get-ports', () => {
-  return { llamaPort: global.llamaPort, orchestratorPort: global.orchestratorPort };
+  return { llamaPort: global.llamaPort, orchestratorPort: global.orchestratorPort, latticaPort: global.latticaPort, echoPort: global.echoPort };
 });
 
 ipcMain.handle('export-logs', async (event, logText) => {
@@ -346,10 +340,25 @@ autoUpdater.on('error', (error) => {
 });
 
 app.whenReady().then(() => {
-  autoUpdater.checkForUpdatesAndNotify();
-  startBackendProcesses().then(() => {
-    createWindow();
-  });
+  startBackendProcesses()
+    .then(() => {
+      // Give orchestrator 2 seconds to start; if it already exited, warn the user
+      setTimeout(() => {
+        if (orchestratorProcess && orchestratorProcess.exitCode !== null) {
+          dialog.showErrorBox(
+            'Backend Failed to Start',
+            `The LLaMA Pro orchestrator exited immediately (code ${orchestratorProcess.exitCode}).\n\nCheck that Python and all dependencies are installed, then restart the app.`
+          );
+        }
+      }, 2000);
+      createWindow();
+      // Check for updates after window is ready so update events can reach the renderer
+      autoUpdater.checkForUpdatesAndNotify();
+    })
+    .catch((err) => {
+      dialog.showErrorBox('Startup Error', `Failed to start backend processes:\n${err.message}`);
+      app.quit();
+    });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

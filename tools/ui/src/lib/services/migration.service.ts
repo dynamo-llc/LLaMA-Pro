@@ -157,36 +157,43 @@ const idxdbMigration: Migration = {
 		// Check if new database already has data
 		const newDb = new Dexie(STORAGE_APP_NAME);
 		newDb.version(1).stores(IDXDB_STORES);
-		const existingConvs = await newDb.table(IDXDB_TABLES.conversations).count();
-		if (existingConvs > 0) {
-			if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
-				console.log('[Migration] IndexedDB: new database already has data, skipping');
-			return;
-		}
-
-		if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
-			console.log('[Migration] IndexedDB: copying from', DB_APP_NAME_DEPRECATED);
 
 		const oldDb = new Dexie(DB_APP_NAME_DEPRECATED);
 		oldDb.version(1).stores(IDXDB_STORES);
 
-		const conversations = await oldDb.table(IDXDB_TABLES.conversations).toArray();
-		const messages = await oldDb.table(IDXDB_TABLES.messages).toArray();
+		try {
+			const existingConvs = await newDb.table(IDXDB_TABLES.conversations).count();
+			if (existingConvs > 0) {
+				if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
+					console.log('[Migration] IndexedDB: new database already has data, skipping');
+				return;
+			}
 
-		if (conversations.length > 0) {
-			await newDb.table(IDXDB_TABLES.conversations).bulkAdd(conversations);
 			if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
-				console.log(`[Migration] IndexedDB: copied ${conversations.length} conversations`);
-		}
-		if (messages.length > 0) {
-			await newDb.table(IDXDB_TABLES.messages).bulkAdd(messages);
-			if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
-				console.log(`[Migration] IndexedDB: copied ${messages.length} messages`);
-		}
+				console.log('[Migration] IndexedDB: copying from', DB_APP_NAME_DEPRECATED);
 
-		// Non-destructive: DO NOT delete old database - keep for downgrade compatibility
-		if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
-			console.log('[Migration] IndexedDB: preserved old database for downgrade compatibility');
+			const conversations = await oldDb.table(IDXDB_TABLES.conversations).toArray();
+			const messages = await oldDb.table(IDXDB_TABLES.messages).toArray();
+
+			if (conversations.length > 0) {
+				await newDb.table(IDXDB_TABLES.conversations).bulkAdd(conversations);
+				if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
+					console.log(`[Migration] IndexedDB: copied ${conversations.length} conversations`);
+			}
+			if (messages.length > 0) {
+				await newDb.table(IDXDB_TABLES.messages).bulkAdd(messages);
+				if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
+					console.log(`[Migration] IndexedDB: copied ${messages.length} messages`);
+			}
+
+			// Non-destructive: DO NOT delete old database - keep for downgrade compatibility
+			if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
+				console.log('[Migration] IndexedDB: preserved old database for downgrade compatibility');
+		} finally {
+			// H8: always close both Dexie instances to release connection slots
+			newDb.close();
+			oldDb.close();
+		}
 	}
 };
 
@@ -451,7 +458,12 @@ const themeMigration: Migration = {
 
 		// Check if config already has theme
 		const configRaw = localStorage.getItem(CONFIG_LOCALSTORAGE_KEY);
-		const config = configRaw ? JSON.parse(configRaw) : {};
+		let config: Record<string, unknown> = {};
+		try {
+			config = configRaw ? JSON.parse(configRaw) : {};
+		} catch {
+			return; // corrupt config - skip migration, don't overwrite
+		}
 
 		if (SETTINGS_KEYS.THEME in config) {
 			if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
@@ -480,7 +492,12 @@ const customJsonKeyMigration: Migration = {
 		const configRaw = localStorage.getItem(CONFIG_LOCALSTORAGE_KEY);
 		if (configRaw === null) return;
 
-		const config = JSON.parse(configRaw);
+		let config: Record<string, unknown>;
+		try {
+			config = JSON.parse(configRaw);
+		} catch {
+			return; // corrupt config - skip migration, don't overwrite
+		}
 
 		if (!('custom' in config)) return;
 		if (SETTINGS_KEYS.CUSTOM_JSON in config) return;

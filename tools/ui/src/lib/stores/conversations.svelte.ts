@@ -127,7 +127,7 @@ class ConversationsStore {
 			const raw = localStorage.getItem(THINKING_ENABLED_DEFAULT_LOCALSTORAGE_KEY);
 			if (!raw) return false;
 			const parsed = raw === 'true';
-			return typeof parsed === 'boolean' ? parsed : false;
+			return parsed;
 		} catch {
 			return false;
 		}
@@ -147,7 +147,10 @@ class ConversationsStore {
 		if (typeof globalThis.localStorage === 'undefined') return ReasoningEffort.MEDIUM;
 		try {
 			const raw = localStorage.getItem(REASONING_EFFORT_DEFAULT_LOCALSTORAGE_KEY);
-			return (raw as ReasoningEffort) || ReasoningEffort.MEDIUM;
+			if (raw && (Object.values(ReasoningEffort) as string[]).includes(raw)) {
+				return raw as ReasoningEffort;
+			}
+			return ReasoningEffort.MEDIUM;
 		} catch {
 			return ReasoningEffort.MEDIUM;
 		}
@@ -185,13 +188,15 @@ class ConversationsStore {
 	async init(): Promise<void> {
 		if (!browser) return;
 		if (this.isInitialized) return;
+		// Set eagerly to block any concurrent call that races past the guard above
+		this.isInitialized = true;
 
 		try {
 			await MigrationService.runAllMigrations();
 
 			await this.loadConversations();
-			this.isInitialized = true;
 		} catch (error) {
+			this.isInitialized = false;
 			console.error('Failed to initialize conversations:', error);
 		}
 	}
@@ -440,6 +445,7 @@ class ConversationsStore {
 		} catch (error) {
 			console.error('Failed to delete all conversations:', error);
 			toast.error('Failed to delete conversations');
+			await this.loadConversations();
 		}
 	}
 
@@ -982,7 +988,13 @@ class ConversationsStore {
 			const trimmed = line.trim();
 			if (!trimmed) continue;
 
-			const record = JSON.parse(trimmed);
+			let record: ReturnType<typeof JSON.parse>;
+			try {
+				record = JSON.parse(trimmed);
+			} catch {
+				console.warn('Skipping malformed JSONL line:', trimmed.slice(0, 80));
+				continue;
+			}
 
 			if (record.type === 'session') {
 				// Drop the discriminator and harness marker; the rest is the conversation.
@@ -1116,7 +1128,8 @@ class ConversationsStore {
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
+		// Defer revocation so the browser has time to start the download
+		setTimeout(() => URL.revokeObjectURL(url), 100);
 	}
 
 	/**
@@ -1148,7 +1161,9 @@ class ConversationsStore {
 		return new Promise((resolve, reject) => {
 			const input = document.createElement('input');
 			input.type = HtmlInputType.FILE;
-			input.accept = FileExtensionText.JSON;
+			input.accept = '.json,.jsonl,.zip';
+
+			input.addEventListener('cancel', () => resolve([]));
 
 			input.onchange = async (e) => {
 				const file = (e.target as HTMLInputElement)?.files?.[0];

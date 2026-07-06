@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { ServerErrorSplash } from '$lib/components/app';
 	import { ROUTES } from '$lib/constants/routes';

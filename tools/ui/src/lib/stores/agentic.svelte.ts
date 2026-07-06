@@ -28,6 +28,7 @@ import { toolsStore } from '$lib/stores/tools.svelte';
 import { permissionsStore } from '$lib/stores/permissions.svelte';
 import { ToolSource, ToolPermissionDecision } from '$lib/enums';
 import { SvelteMap } from 'svelte/reactivity';
+import { tick } from 'svelte';
 import { ToolsService } from '$lib/services/tools.service';
 import { SandboxService } from '$lib/services/sandbox.service';
 import { isAbortError } from '$lib/utils';
@@ -176,6 +177,11 @@ class AgenticStore {
 
 	clearSession(conversationId: string): void {
 		this._sessions.delete(conversationId);
+		this._pendingPermissions.delete(conversationId);
+		this._permissionResolvers.delete(conversationId);
+		this._pendingContinueRequests.delete(conversationId);
+		this._continueResolvers.delete(conversationId);
+		this._steeringMessages.delete(conversationId);
 	}
 
 	getActiveSessions(): Array<{ conversationId: string; session: AgenticSession }> {
@@ -297,7 +303,11 @@ class AgenticStore {
 		if (typeof args === 'object') return args;
 		const trimmed = args.trim();
 		if (trimmed === '') return {};
-		return JSON.parse(trimmed) as Record<string, unknown>;
+		try {
+			return JSON.parse(trimmed) as Record<string, unknown>;
+		} catch {
+			return { _parseError: `Invalid JSON in tool arguments: ${trimmed.slice(0, 200)}` };
+		}
 	}
 
 	private async requestPermission(
@@ -320,7 +330,17 @@ class AgenticStore {
 				return;
 			}
 
+			const abortHandler = () => {
+				const resolver = this._permissionResolvers.get(conversationId);
+				if (resolver) {
+					this._permissionResolvers.delete(conversationId);
+					this._pendingPermissions.set(conversationId, null);
+					resolve(ToolPermissionDecision.DENY);
+				}
+			};
+
 			this._permissionResolvers.set(conversationId, (decision) => {
+				signal?.removeEventListener('abort', abortHandler);
 				this._pendingPermissions.set(conversationId, null);
 				if (decision === ToolPermissionDecision.ALWAYS && permissionKey) {
 					permissionsStore.allowTool(permissionKey);
@@ -338,18 +358,7 @@ class AgenticStore {
 				resolve(decision);
 			});
 
-			signal?.addEventListener(
-				'abort',
-				() => {
-					const resolver = this._permissionResolvers.get(conversationId);
-					if (resolver) {
-						this._permissionResolvers.delete(conversationId);
-						this._pendingPermissions.set(conversationId, null);
-						resolve(ToolPermissionDecision.DENY);
-					}
-				},
-				{ once: true }
-			);
+			signal?.addEventListener('abort', abortHandler, { once: true });
 		});
 	}
 
@@ -363,23 +372,22 @@ class AgenticStore {
 				return;
 			}
 
+			const abortHandler = () => {
+				const resolver = this._continueResolvers.get(conversationId);
+				if (resolver) {
+					this._continueResolvers.delete(conversationId);
+					this._pendingContinueRequests.set(conversationId, false);
+					resolve(false);
+				}
+			};
+
 			this._continueResolvers.set(conversationId, (shouldContinue) => {
+				signal?.removeEventListener('abort', abortHandler);
 				this._pendingContinueRequests.set(conversationId, false);
 				resolve(shouldContinue);
 			});
 
-			signal?.addEventListener(
-				'abort',
-				() => {
-					const resolver = this._continueResolvers.get(conversationId);
-					if (resolver) {
-						this._continueResolvers.delete(conversationId);
-						this._pendingContinueRequests.set(conversationId, false);
-						resolve(false);
-					}
-				},
-				{ once: true }
-			);
+			signal?.addEventListener('abort', abortHandler, { once: true });
 		});
 	}
 
@@ -402,11 +410,15 @@ class AgenticStore {
 		if (!agenticConfig.enabled) return { handled: false };
 
 		const hasMcpServers = mcpStore.hasEnabledServers(perChatOverrides);
+		let mcpConnectionAcquired = false;
 		if (hasMcpServers) {
 			const initialized = await mcpStore.ensureInitialized(perChatOverrides);
 
 			if (!initialized) {
 				console.log('[AgenticStore] MCP not initialized');
+			} else {
+				mcpStore.acquireConnection();
+				mcpConnectionAcquired = true;
 			}
 		}
 
@@ -442,8 +454,6 @@ class AgenticStore {
 			lastError: null
 		});
 
-		if (hasMcpServers) mcpStore.acquireConnection();
-
 		try {
 			await this.executeAgenticLoop({
 				conversationId,
@@ -463,7 +473,7 @@ class AgenticStore {
 		} finally {
 			this.updateSession(conversationId, { isRunning: false });
 
-			if (hasMcpServers) {
+			if (mcpConnectionAcquired) {
 				await mcpStore
 					.releaseConnection()
 					.catch((err: unknown) =>
@@ -518,10 +528,14 @@ class AgenticStore {
 		while (true) {
 			if (turn >= maxTurns) {
 				// Turn limit reached - ask user whether to continue
+				if (signal?.aborted) {
+					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
+					return;
+				}
 				const shouldContinue = await this.requestContinue(conversationId, signal);
 
-				// Yield to allow Svelte to flush the UI update
-				await new Promise((r) => setTimeout(r, 0));
+				// Yield to allow Svelte to flush UI (tick() is the correct Svelte 5 idiom)
+				await tick();
 
 				if (!shouldContinue || signal?.aborted) {
 					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
@@ -761,7 +775,7 @@ class AgenticStore {
 				);
 
 				// Yield to allow Svelte to flush the UI update (hide permission dialog)
-				await new Promise((r) => setTimeout(r, 0));
+				await tick();
 
 				if (signal?.aborted) {
 					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
@@ -804,6 +818,12 @@ class AgenticStore {
 						}
 					} catch (error) {
 						if (isAbortError(error)) {
+							await onAssistantTurnComplete?.(
+								turnContent,
+								turnReasoningContent || undefined,
+								this.buildFinalTimings(capturedTimings, agenticTimings),
+								undefined
+							);
 							onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
 							return;
 						}

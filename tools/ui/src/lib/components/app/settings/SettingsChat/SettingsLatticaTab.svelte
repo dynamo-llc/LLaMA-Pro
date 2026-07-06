@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Activity, Globe, Network, Server, Zap, RefreshCw } from '@lucide/svelte';
+	import { getDaemonUrl } from '$lib/utils/get-base-url';
 
 	interface Peer {
 		id: string;
@@ -25,7 +26,7 @@
 
 	async function fetchPeers() {
 		try {
-			const res = await fetch('http://127.0.0.1:50053/peers');
+			const res = await fetch(`${getDaemonUrl('lattica')}/peers`);
 			if (res.ok) {
 				const data = await res.json();
 				peers = data.peers || [];

@@ -9,6 +9,7 @@
 	import { Label } from '$lib/components/ui/label';
 
 	import { modelsStore } from '$lib/stores/models.svelte';
+	import { getBaseUrl } from '$lib/utils/get-base-url';
 
 	let { open = $bindable(false) } = $props();
 
@@ -20,11 +21,10 @@
 
 	let pollInterval: ReturnType<typeof setInterval>;
 
-	const ORCHESTRATOR_URL = 'http://localhost:8000';
 
 	async function fetchSettings() {
 		try {
-			const res = await fetch(`${ORCHESTRATOR_URL}/api/rpc/settings`);
+			const res = await fetch(`${getBaseUrl('orchestrator')}/api/rpc/settings`);
 			if (res.ok) {
 				const data = await res.json();
 				isSharingEnabled = data.is_sharing_enabled;
@@ -37,7 +37,7 @@
 
 	async function saveSettings() {
 		try {
-			await fetch(`${ORCHESTRATOR_URL}/api/rpc/settings`, {
+			await fetch(`${getBaseUrl('orchestrator')}/api/rpc/settings`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -53,7 +53,7 @@
 
 	async function fetchPeers() {
 		try {
-			const res = await fetch(`${ORCHESTRATOR_URL}/api/rpc/peers`);
+			const res = await fetch(`${getBaseUrl('orchestrator')}/api/rpc/peers`);
 			if (res.ok) {
 				const data = await res.json();
 				peers = data.peers || {};
@@ -65,7 +65,7 @@
 
 	async function fetchPendingRequests() {
 		try {
-			const res = await fetch(`${ORCHESTRATOR_URL}/api/rpc/pending-requests`);
+			const res = await fetch(`${getBaseUrl('orchestrator')}/api/rpc/pending-requests`);
 			if (res.ok) {
 				const data = await res.json();
 				pendingRequests = data.requests || [];
@@ -77,7 +77,7 @@
 
 	async function authorizeRequest(reqId: string, accept: boolean) {
 		try {
-			const res = await fetch(`${ORCHESTRATOR_URL}/api/rpc/authorize/${reqId}?accept=${accept}`, {
+			const res = await fetch(`${getBaseUrl('orchestrator')}/api/rpc/authorize/${reqId}?accept=${accept}`, {
 				method: 'POST'
 			});
 			if (res.ok) {
@@ -93,7 +93,7 @@
 		loading = true;
 		try {
 			toast.info('Connecting to peer...');
-			const res = await fetch(`${ORCHESTRATOR_URL}/api/rpc/connect/${peerId}`, { method: 'POST' });
+			const res = await fetch(`${getBaseUrl('orchestrator')}/api/rpc/connect/${peerId}`, { method: 'POST' });
 			const data = await res.json();
 			if (data.status === 'success') {
 				const existing = modelsStore.activeRpcPeers.find((p) => p.id === peerId);

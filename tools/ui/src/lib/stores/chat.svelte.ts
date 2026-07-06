@@ -78,9 +78,6 @@ class ChatStore {
 	private isEditModeActive = $state(false);
 	private addFilesHandler: ((files: File[]) => void) | null = $state(null);
 	pendingEditMessageId = $state<string | null>(null);
-	private messageUpdateCallback:
-		| ((messageId: string, updates: Partial<DatabaseMessage>) => void)
-		| null = null;
 	private _pendingDraftMessage = $state<string>('');
 	private _pendingDraftFiles = $state<ChatUploadedFile[]>([]);
 
@@ -348,8 +345,9 @@ class ChatStore {
 		cleanupCandidates.sort((a, b) => a.lastAccessed - b.lastAccessed);
 		let cleanedUp = 0;
 		for (const { convId, lastAccessed } of cleanupCandidates) {
+			const currentTracked = this.getTrackedConversationCount();
 			if (
-				cleanupCandidates.length - cleanedUp > MAX_INACTIVE_CONVERSATION_STATES ||
+				currentTracked > MAX_INACTIVE_CONVERSATION_STATES ||
 				now - lastAccessed > INACTIVE_CONVERSATION_STATE_MAX_AGE_MS
 			) {
 				this.cleanupConversationState(convId);
@@ -594,7 +592,7 @@ class ChatStore {
 				parentIdForUserMessage ?? '-1',
 				allExtras
 			);
-			if (isNewConversation && content)
+			if (isNewConversation && content && !config().titleGenerationUseLLM)
 				await conversationsStore.updateConversationName(
 					currentConv.id,
 					generateConversationTitle(content, Boolean(config().titleGenerationUseFirstLine))
@@ -665,13 +663,15 @@ class ChatStore {
 			if (!n || n === resolvedModel) return;
 			resolvedModel = n;
 			const idx = conversationsStore.findMessageIndex(currentMessageId);
-			conversationsStore.updateMessageAtIndex(idx, { model: n });
-			if (persistImmediately && !modelPersisted) {
-				modelPersisted = true;
-				DatabaseService.updateMessage(currentMessageId, { model: n }).catch(() => {
-					modelPersisted = false;
-					resolvedModel = null;
-				});
+			if (idx !== -1) {
+				conversationsStore.updateMessageAtIndex(idx, { model: n });
+				if (persistImmediately && !modelPersisted) {
+					modelPersisted = true;
+					DatabaseService.updateMessage(currentMessageId, { model: n }).catch(() => {
+						modelPersisted = false;
+						resolvedModel = null;
+					});
+				}
 			}
 		};
 
@@ -680,10 +680,12 @@ class ChatStore {
 			if (!id || completionIdRecorded) return;
 			completionIdRecorded = true;
 			const idx = conversationsStore.findMessageIndex(currentMessageId);
-			conversationsStore.updateMessageAtIndex(idx, { completionId: id });
-			DatabaseService.updateMessage(currentMessageId, { completionId: id }).catch(() => {
-				completionIdRecorded = false;
-			});
+			if (idx !== -1) {
+				conversationsStore.updateMessageAtIndex(idx, { completionId: id });
+				DatabaseService.updateMessage(currentMessageId, { completionId: id }).catch(() => {
+					completionIdRecorded = false;
+				});
+			}
 		};
 
 		const updateStreamingUI = () => {
@@ -822,6 +824,7 @@ class ChatStore {
 
 				const lastMsg =
 					conversationsStore.activeMessages[conversationsStore.activeMessages.length - 1];
+				if (!lastMsg) throw new Error('No messages in active conversation');
 				const msg = await DatabaseService.createMessageBranch(
 					{
 						convId,
@@ -871,7 +874,7 @@ class ChatStore {
 					// If aborted with a pending message (e.g. "Send immediately"), re-send it
 					const pending = this.consumePendingMessage(convId);
 					if (pending) {
-						this.sendMessage(pending.content, pending.extras);
+						await this.sendMessage(pending.content, pending.extras);
 					}
 					return;
 				}
@@ -1091,8 +1094,8 @@ class ChatStore {
 				};
 			}
 			await DatabaseService.updateMessage(lastMessage.id, updateData);
-			lastMessage.content = partialContent;
-			if (updateData.timings) lastMessage.timings = updateData.timings;
+			const lastIdx = conversationsStore.activeMessages.length - 1;
+			conversationsStore.updateMessageAtIndex(lastIdx, updateData);
 		} catch (error) {
 			lastMessage.content = partialContent;
 			console.error('Failed to save partial response:', error);

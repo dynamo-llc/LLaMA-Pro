@@ -55,6 +55,7 @@ export function useProcessingState(): UseProcessingStateReturn {
 
 	// Track last known processing stats for when promptProgress disappears
 	$effect(() => {
+		if (!isMonitoring) return;
 		if (processingState?.promptProgress) {
 			const { processed, total, time_ms, cache } = processingState.promptProgress;
 			const actualProcessed = processed - cache;
@@ -236,7 +237,8 @@ export function useProcessingState(): UseProcessingStateReturn {
 	}
 
 	function shouldShowDetails(): boolean {
-		return processingState !== null && processingState.status !== 'idle';
+		const state = processingState ?? lastKnownState;
+		return state !== null && state.status !== 'idle';
 	}
 
 	/**
@@ -249,6 +251,7 @@ export function useProcessingState(): UseProcessingStateReturn {
 
 		const actualProcessed = processed - cache;
 		const actualTotal = total - cache;
+		if (actualTotal <= 0) return null;
 		const percent = Math.round((actualProcessed / actualTotal) * 100);
 		const eta = getETASecs(actualProcessed, actualTotal, processingState.promptProgress.time_ms);
 

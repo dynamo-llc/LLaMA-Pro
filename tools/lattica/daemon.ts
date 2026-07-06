@@ -54,7 +54,7 @@ async function startLatticaNode() {
 // Start Express Server
 const app = express()
 app.use(cors())
-const PORT = 50053
+const PORT = parseInt(process.env.LATTICA_PORT || '50053', 10)
 const RPC_PORT = 50052 // Default llama.cpp rpc-server port
 
 // Generate deterministic mock geo coordinates and latency based on peerId

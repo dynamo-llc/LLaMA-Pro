@@ -93,7 +93,8 @@ export class ChatService {
 				undefined,
 				signal
 			);
-		} catch {
+		} catch (err) {
+			if (err instanceof Error && err.name === 'AbortError') throw err;
 			return '';
 		}
 		return titleResponse;
@@ -169,7 +170,7 @@ export class ChatService {
 			continueFinalMessage
 		} = options;
 
-		const normalizedMessages: ApiChatMessageData[] = (
+		let normalizedMessages: ApiChatMessageData[] = (
 			await Promise.all(
 				messages.map((msg) => {
 					if ('id' in msg && 'convId' in msg && 'timestamp' in msg) {
@@ -194,28 +195,27 @@ export class ChatService {
 
 		// Filter out image attachments if the model doesn't support vision
 		if (options.model && !modelsStore.modelSupportsVision(options.model)) {
-			normalizedMessages.forEach((msg) => {
-				if (Array.isArray(msg.content)) {
-					msg.content = msg.content.filter((part: ApiChatMessageContentPart) => {
-						if (part.type === ContentPartType.IMAGE_URL) {
-							console.info(
-								`[ChatService] Skipping image attachment in message history (model "${options.model}" does not support vision)`
-							);
-
-							return false;
-						}
-
-						return true;
-					});
-					// If only text remains and it's a single part, simplify to string
-					if (
-						msg.content.length === 1 &&
-						msg.content[0].type === ContentPartType.TEXT &&
-						typeof msg.content[0].text === 'string'
-					) {
-						msg.content = msg.content[0].text;
+			normalizedMessages = normalizedMessages.map((msg) => {
+				if (!Array.isArray(msg.content)) return msg;
+				let content = msg.content.filter((part: ApiChatMessageContentPart) => {
+					if (part.type === ContentPartType.IMAGE_URL) {
+						console.info(
+							`[ChatService] Skipping image attachment in message history (model "${options.model}" does not support vision)`
+						);
+						return false;
 					}
+					return true;
+				});
+				// If only text remains and it's a single part, simplify to string
+				let simplifiedContent: string | ApiChatMessageContentPart[] = content;
+				if (
+					content.length === 1 &&
+					content[0].type === ContentPartType.TEXT &&
+					typeof content[0].text === 'string'
+				) {
+					simplifiedContent = content[0].text;
 				}
+				return { ...msg, content: simplifiedContent };
 			});
 		}
 
@@ -409,7 +409,8 @@ export class ChatService {
 
 			const slots: { is_processing: boolean }[] = await res.json();
 			return slots.every((s) => !s.is_processing);
-		} catch {
+		} catch (err) {
+			if (err instanceof Error && err.name === 'AbortError') throw err;
 			return true;
 		}
 	}
@@ -730,9 +731,6 @@ export class ChatService {
 			}
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error('Stream error');
-
-			onError?.(err);
-
 			throw err;
 		} finally {
 			reader.releaseLock();

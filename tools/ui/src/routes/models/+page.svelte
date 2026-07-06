@@ -39,6 +39,7 @@
 	import { getAuthHeaders } from '$lib/utils/api-headers';
 	import { ServerModelStatus } from '$lib/enums';
 	import { ActionIconCopyToClipboard, MarkdownContent, RpcDialog } from '$lib/components/app';
+	import { getBaseUrl } from '$lib/utils/get-base-url';
 
 	let showRpcDialog = $state(false);
 
@@ -101,7 +102,7 @@
 
 	async function loadSwarmConfigs() {
 		try {
-			const res = await fetch('http://127.0.0.1:8000/v1/swarm/config');
+			const res = await fetch(`${getBaseUrl('orchestrator')}/v1/swarm/config`);
 			if (res.ok) {
 				const data = await res.json();
 				swarmConfigs = data.configs || [];
@@ -115,7 +116,7 @@
 	async function handleSwarmChange(event: Event) {
 		const selectedId = (event.target as HTMLSelectElement).value;
 		try {
-			const res = await fetch('http://127.0.0.1:8000/v1/swarm/config/active', {
+			const res = await fetch(`${getBaseUrl('orchestrator')}/v1/swarm/config/active`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ active_config_id: selectedId || null })
@@ -293,7 +294,7 @@
 
 	async function fetchGraph() {
 		try {
-			const res = await fetch('http://127.0.0.1:8000/v1/swarm/graph');
+			const res = await fetch(`${getBaseUrl('orchestrator')}/v1/swarm/graph`);
 			if (res.ok) {
 				const data = await res.json();
 				mermaidString = data.mermaid;

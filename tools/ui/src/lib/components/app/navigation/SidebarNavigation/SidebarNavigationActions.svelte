@@ -110,11 +110,13 @@
 			{@const isSearchOnMobile = item.icon === Search && isMobile.current}
 			{@const itemHref = isSearchOnMobile ? ROUTES.SEARCH : (item.route === ROUTES.COMPANION ? undefined : item.route)}
 			{@const itemOnClick = item.route
-				? () => {
-						onNewChat?.();
+				? async () => {
 						if (item.route === ROUTES.COMPANION) {
+							await goto('/');
 							companionStore.open();
 						} else {
+							onNewChat?.();
+							companionStore.close();
 							goto(item.route!);
 						}
 					}
@@ -166,11 +168,13 @@
 			{@const isActive = isItemActive(item)}
 			{@const isSearchOnMobile = item.icon === Search && isMobile.current}
 			{@const itemOnClick = item.route
-				? () => {
-						onNewChat?.();
+				? async () => {
 						if (item.route === ROUTES.COMPANION) {
+							await goto('/');
 							companionStore.open();
 						} else {
+							onNewChat?.();
+							companionStore.close();
 							goto(item.route!);
 						}
 					}

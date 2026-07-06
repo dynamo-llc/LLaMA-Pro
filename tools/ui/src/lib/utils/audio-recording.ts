@@ -20,6 +20,9 @@ export class AudioRecorder {
 	private recordingState: boolean = false;
 
 	async startRecording(): Promise<void> {
+		if (this.recordingState || this.stream) {
+			throw new Error('Recording is already in progress');
+		}
 		try {
 			this.stream = await navigator.mediaDevices.getUserMedia({
 				audio: {
@@ -58,31 +61,39 @@ export class AudioRecorder {
 			this.stream = null;
 			this.recordingState = false;
 
-			recorder.onstop = () => {
-				const audioBlob = new Blob(chunks, {
-					type: recorder.mimeType || MimeTypeAudio.WAV
-				});
+			recorder.addEventListener(
+				'stop',
+				() => {
+					const audioBlob = new Blob(chunks, {
+						type: recorder.mimeType || MimeTypeAudio.WAV
+					});
 
-				if (stream) {
-					for (const track of stream.getTracks()) {
-						track.stop();
+					if (stream) {
+						for (const track of stream.getTracks()) {
+							track.stop();
+						}
 					}
-				}
 
-				resolve(audioBlob);
-			};
+					resolve(audioBlob);
+				},
+				{ once: true }
+			);
 
-			recorder.onerror = (event) => {
-				console.error('Recording error:', event);
+			recorder.addEventListener(
+				'error',
+				(event) => {
+					console.error('Recording error:', event);
 
-				if (stream) {
-					for (const track of stream.getTracks()) {
-						track.stop();
+					if (stream) {
+						for (const track of stream.getTracks()) {
+							track.stop();
+						}
 					}
-				}
 
-				reject(new Error('Recording failed'));
-			};
+					reject(new Error('Recording failed'));
+				},
+				{ once: true }
+			);
 
 			recorder.stop();
 		});
@@ -218,7 +229,7 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
 			let s = channels[c][i];
 			if (s > 1) s = 1;
 			else if (s < -1) s = -1;
-			pcm[p++] = s * 0x7fff;
+			pcm[p++] = s < 0 ? Math.round(s * 0x8000) : Math.round(s * 0x7fff);
 		}
 	}
 
@@ -233,7 +244,15 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
  */
 export function createAudioFile(audioBlob: Blob, filename?: string): File {
 	const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-	const extension = audioBlob.type.includes('wav') ? 'wav' : 'mp3';
+	const mimeToExt: Record<string, string> = {
+		'audio/wav': 'wav',
+		'audio/x-wav': 'wav',
+		'audio/webm': 'webm',
+		'audio/ogg': 'ogg',
+		'audio/mp4': 'mp4',
+		'audio/aac': 'aac'
+	};
+	const extension = mimeToExt[audioBlob.type] ?? 'webm';
 	const defaultFilename = `recording-${timestamp}.${extension}`;
 
 	return new File([audioBlob], filename || defaultFilename, {

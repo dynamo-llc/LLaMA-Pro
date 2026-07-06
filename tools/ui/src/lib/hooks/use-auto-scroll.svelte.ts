@@ -22,6 +22,7 @@ export class AutoScrollController {
 	private _mutationObserver: MutationObserver | null = null;
 	private _rafPending = false;
 	private _observerEnabled = false;
+	private _destroyed = false;
 	constructor(options: AutoScrollOptions = {}) {
 		this._disabled = options.disabled ?? false;
 	}
@@ -39,6 +40,9 @@ export class AutoScrollController {
 	 */
 	setContainer(container: HTMLElement | undefined): void {
 		this._doStopObserving();
+		if (!container) {
+			this._lastScrollTop = 0;
+		}
 		this._container = container;
 
 		if (this._observerEnabled && container && !this._disabled) {
@@ -66,6 +70,7 @@ export class AutoScrollController {
 	 */
 	handleScroll(): void {
 		if (this._disabled || !this._container) return;
+		if (this._container.scrollHeight === 0) return;
 
 		const { scrollTop, scrollHeight, clientHeight } = this._container;
 		const distanceFromBottom = scrollHeight - clientHeight - scrollTop;
@@ -155,6 +160,7 @@ export class AutoScrollController {
 	 * Cleans up resources. Call this in onDestroy or when the component unmounts.
 	 */
 	destroy(): void {
+		this._destroyed = true;
 		this.stopInterval();
 		this._doStopObserving();
 	}
@@ -187,7 +193,7 @@ export class AutoScrollController {
 			this._rafPending = true;
 			requestAnimationFrame(() => {
 				this._rafPending = false;
-				if (this._autoScrollEnabled && this._container) {
+				if (!this._destroyed && this._autoScrollEnabled && this._container) {
 					this._container.scrollTop = this._container.scrollHeight;
 				}
 			});

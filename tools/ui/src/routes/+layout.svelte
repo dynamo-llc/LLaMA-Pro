@@ -37,6 +37,24 @@
 	import { SETTINGS_KEYS } from '$lib/constants';
 	import { Files, Activity, Terminal, Settings, Rss, Bot } from '@lucide/svelte';
 	import McpLogo from '$lib/components/app/mcp/McpLogo.svelte';
+	import { getBaseUrl } from '$lib/utils/get-base-url';
+
+	// Live news ticker state (#11)
+	let tickerText = $state('✦ Distributed Ai Engine Feature: Local LoRA Training to fine-tune models directly on your hardware ✦ Feature: Remote Access with Cloudflare Tunnels and Local Network Discovery ✦ Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip: Extend capabilities with custom MCP server integrations ✦ Feature: Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and run the newest models from Hugging Face ✦ Feature: Premium Themes like Neon City and Hacker Console with glassmorphism ✦ Feature: Run fully local, private AI models on consumer hardware with ggml quantization ✦ Feature: Real-time Telemetry & Advanced prompt engineering controls ✦');
+	let newsCount = $state(0);
+
+	async function fetchTickerNews() {
+		try {
+			const res = await fetch(`${getBaseUrl('orchestrator')}/api/news`);
+			if (res.ok) {
+				const items: { title: string; source: string }[] = await res.json();
+				if (items && items.length > 0) {
+					newsCount = items.length;
+					tickerText = items.map(n => `✦ ${n.source ? '[' + n.source + '] ' : ''}${n.title}`).join('  ');
+				}
+			}
+		} catch (e) { /* keep static fallback */ }
+	}
 
 	if (browser && window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
 		const originalFetch = window.fetch;
@@ -73,6 +91,8 @@
 						orchestratorPort = ports.orchestratorPort;
 						window.llamaPort = llamaPort;
 						window.orchestratorPort = orchestratorPort;
+						window.latticaPort = ports.latticaPort;
+						window.echoPort = ports.echoPort;
 					} catch (e) {
 						console.error('Failed to get dynamic ports via IPC:', e);
 					}
@@ -220,8 +240,41 @@
 		}
 	}
 
+	$effect(() => {
+		const routeId = page.route.id as string | null;
+		if (routeId && routeId !== '/(chat)' && companionStore.isOpen) {
+			companionStore.close();
+		}
+	});
+
 	onMount(() => {
 		updateFavicon();
+		
+		const autoOpen = () => {
+			const pathname = page.url.pathname;
+			const routeId = page.route.id as string | null;
+			const wasDismissed = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('companion_dismissed') === '1';
+			if (!wasDismissed && (pathname === '/' || pathname.endsWith('index.html') || routeId === '/(chat)')) {
+				companionStore.open();
+			}
+		};
+
+		if (window.electronAPI && window.electronAPI.getPorts) {
+			window.electronAPI.getPorts().then((ports: any) => {
+				window.llamaPort = ports.llamaPort;
+				window.orchestratorPort = ports.orchestratorPort;
+				window.latticaPort = ports.latticaPort;
+				window.echoPort = ports.echoPort;
+					autoOpen();
+				}).catch(() => {
+					autoOpen();
+				});
+		} else {
+			setTimeout(autoOpen, 350);
+		}
+
+		// Fetch live news for the ticker (#11)
+		setTimeout(fetchTickerNews, 1000);
 		
 		if (window.electronAPI) {
 			if (window.electronAPI.onUpdateReady) {
@@ -249,6 +302,48 @@
 					});
 				});
 			}
+		}
+
+		// Background Wake Word Detection ("Hey Llama")
+		const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+		if (SpeechRecognition) {
+			const recognition = new SpeechRecognition();
+			recognition.continuous = true;
+			recognition.interimResults = true;
+			recognition.lang = 'en-US';
+
+			recognition.onresult = (event: any) => {
+				if (companionStore.isOpen) return;
+
+				for (let i = event.resultIndex; i < event.results.length; ++i) {
+					if (event.results[i].isFinal) {
+						const text = event.results[i][0].transcript.toLowerCase();
+						const word = companionStore.wakeWord.toLowerCase().trim();
+						if (text.includes(word)) {
+							companionStore.open();
+						}
+					}
+				}
+			};
+
+			recognition.onerror = () => {};
+			recognition.onend = () => {
+				if (!companionStore.isOpen) {
+					try { recognition.start(); } catch (e) {}
+				}
+			};
+
+			try {
+				recognition.start();
+			} catch (e) {}
+
+			$effect(() => {
+				if (companionStore.isOpen) {
+					try { recognition.stop(); } catch (e) {}
+				} else {
+					try { recognition.start(); } catch (e) {}
+				}
+			});
 		}
 	});
 
@@ -361,22 +456,22 @@
 	const activeSubmenu = $derived.by(() => {
 		const routeId = page.route.id || '';
 		if (routeId.startsWith('/mcp-servers')) {
-			return { title: 'MCP Servers', icon: McpLogo };
+			return { title: 'MCP Servers', icon: McpLogo, badge: null };
 		}
 		if (routeId.startsWith('/news')) {
-			return { title: 'News & Discoveries', icon: Rss };
+			return { title: 'News & Discoveries', icon: Rss, badge: newsCount > 0 ? `${newsCount} articles` : null };
 		}
 		if (routeId.startsWith('/models')) {
-			return { title: 'Model Management', icon: Files };
+			return { title: 'Model Management', icon: Files, badge: null };
 		}
 		if (routeId.startsWith('/telemetry')) {
-			return { title: 'Telemetry', icon: Activity };
+			return { title: 'Telemetry', icon: Activity, badge: null };
 		}
 		if (routeId.startsWith('/terminal')) {
-			return { title: 'Live Terminal', icon: Terminal };
+			return { title: 'Live Terminal', icon: Terminal, badge: null };
 		}
 		if (routeId.startsWith('/settings')) {
-			return { title: 'Settings', icon: Settings };
+			return { title: 'Settings', icon: Settings, badge: null };
 		}
 		return null;
 	});
@@ -434,7 +529,7 @@
 						<div class="h-3 w-px bg-border"></div>
 						<div class="flex flex-col items-start">
 							<span class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md leading-tight">
-								Distributed Ai Engine 2.0.4
+								Distributed Ai Engine 2.0.6
 							</span>
 							<span class="text-[8px] text-muted-foreground px-2 pt-0.5 opacity-70">
 								&nbsp;&nbsp;by <a href="http://www.dynamo.llc" target="_blank" rel="noopener noreferrer" class="hover:text-primary transition-colors cursor-pointer underline underline-offset-2">Dynamo.llc</a>
@@ -450,7 +545,7 @@
 							<div
 								class="marquee-content text-zinc-700 dark:text-zinc-300 font-pixel whitespace-nowrap text-[9px] md:text-[10px]"
 							>
-								✦ Distributed Ai Engine Feature: Local LoRA Training to fine-tune models directly on your hardware ✦ Feature: Remote Access with Cloudflare Tunnels and Local Network Discovery ✦ Feature: Compute Pool using decentralized peer-to-peer networking ✦ Tip: Extend capabilities with custom MCP server integrations ✦ Feature: Agent Swarms using a coordinated assembly of autonomous agents ✦ Tip: Download and run the newest models from Hugging Face ✦ Feature: Premium Themes like Neon City and Hacker Console with glassmorphism ✦ Feature: Run fully local, private AI models on consumer hardware with ggml quantization ✦ Feature: Real-time Telemetry & Advanced prompt engineering controls ✦
+								{tickerText}
 							</div>
 						</div>
 					</div>
@@ -494,6 +589,9 @@
 							<span class="text-xs md:text-sm font-semibold tracking-wider uppercase">
 								{activeSubmenu.title}
 							</span>
+							{#if activeSubmenu.badge}
+								<span class="text-[9px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-bold tracking-wide">{activeSubmenu.badge}</span>
+							{/if}
 						</div>
 					</div>
 				{/if}
@@ -510,6 +608,7 @@
 						{@render children?.()}
 					</div>
 				{/key}
+				<CompanionOverlay />
 			</div>
 		</div>
 	</div>
@@ -527,9 +626,7 @@
 	/>
 </Tooltip.Provider>
 
-<CompanionOverlay />
-
-<!-- Floating J.A.R.V.I.S. Orb Toggle -->
+<!-- Floating Companion Orb Toggle -->
 {#if !companionStore.isOpen}
 	<button 
 		class="fixed bottom-4 right-4 z-[9900] group flex items-center justify-center w-14 h-14 rounded-full bg-black hover:bg-black/80 border border-primary/30 shadow-[0_0_20px_rgba(0,210,255,0.2)] hover:shadow-[0_0_30px_rgba(0,210,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95"

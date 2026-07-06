@@ -27,6 +27,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Server, Copy } from '@lucide/svelte';
 	import { onMount } from 'svelte';
+	import { getDaemonUrl } from '$lib/utils/get-base-url';
 
 	let isServerAlive = $state(false);
 	let healthCheckFailed = $state(false);
@@ -57,7 +58,7 @@
 		}
 
 		try {
-			const latticaRes = await fetch('http://127.0.0.1:50053/peers');
+			const latticaRes = await fetch(`${getDaemonUrl('lattica')}/peers`);
 			if (latticaRes.ok) {
 				const data = await latticaRes.json();
 				latticaPeerCount = data.count || 0;

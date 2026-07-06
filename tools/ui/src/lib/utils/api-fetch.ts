@@ -1,7 +1,7 @@
 import { base } from '$app/paths';
 import { getJsonHeaders, getAuthHeaders } from './api-headers';
 import { UrlProtocol } from '$lib/enums';
-import { ERROR_MESSAGES, HTTP_CODE_TO_STRING } from '$lib/constants/error';
+import { HTTP_CODE_TO_STRING, ERROR_MESSAGES } from '$lib/constants/error';
 
 /**
  * API Fetch Utilities
@@ -55,30 +55,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
 			? path
 			: `${base}${path}`;
 
-	let response;
-	let retries = 3;
-	let backoff = 1000;
-	
-	while (retries >= 0) {
-		try {
-			response = await fetch(url, {
-				...fetchOptions,
-				headers
-			});
-			break; // Success, exit retry loop
-		} catch (e) {
-			if (retries === 0) {
-				throw new Error(beautifyNetworkError(e));
-			}
-			retries--;
-			await new Promise((resolve) => setTimeout(resolve, backoff));
-			backoff *= 2; // Exponential backoff
-		}
-	}
-	
-	if (!response) {
-		throw new Error(ERROR_MESSAGES.NETWORK.UNREACHABLE);
-	}
+	const response = await fetchWithRetry(url, { ...fetchOptions, headers });
 
 	if (!response.ok) {
 		const errorMessage = await parseErrorMessage(response);
@@ -106,7 +83,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
  */
 export async function apiFetchWithParams<T>(
 	basePath: string,
-	params: Record<string, string>,
+	params: Record<string, string | null | undefined>,
 	options: ApiFetchOptions = {}
 ): Promise<T> {
 	const url = new URL(basePath, window.location.href);
@@ -122,30 +99,7 @@ export async function apiFetchWithParams<T>(
 	const baseHeaders = authOnly ? getAuthHeaders() : getJsonHeaders();
 	const headers = { ...baseHeaders, ...customHeaders };
 
-	let response;
-	let retries = 3;
-	let backoff = 1000;
-	
-	while (retries >= 0) {
-		try {
-			response = await fetch(url.toString(), {
-				...fetchOptions,
-				headers
-			});
-			break;
-		} catch (e) {
-			if (retries === 0) {
-				throw new Error(beautifyNetworkError(e));
-			}
-			retries--;
-			await new Promise((resolve) => setTimeout(resolve, backoff));
-			backoff *= 2;
-		}
-	}
-	
-	if (!response) {
-		throw new Error(ERROR_MESSAGES.NETWORK.UNREACHABLE);
-	}
+	const response = await fetchWithRetry(url.toString(), { ...fetchOptions, headers });
 
 	if (!response.ok) {
 		const errorMessage = await parseErrorMessage(response);
@@ -154,6 +108,49 @@ export async function apiFetchWithParams<T>(
 
 	return response.json() as Promise<T>;
 }
+
+/**
+ * Shared fetch helper with retry + exponential backoff.
+ * Fast-fails on AbortError; uses an abort-aware sleep to avoid stalling cancelled requests.
+ */
+async function fetchWithRetry(url: string | URL, init: RequestInit): Promise<Response> {
+	let retries = 3;
+	let backoff = 1000;
+
+	while (true) {
+		try {
+			return await fetch(url, init);
+		} catch (e) {
+			// Fast-fail on abort - never retry an intentionally cancelled request
+			if (e instanceof DOMException && e.name === 'AbortError') throw e;
+			if (e instanceof Error && e.name === 'AbortError') throw e;
+
+			if (retries === 0) {
+				throw new Error(beautifyNetworkError(e));
+			}
+			retries--;
+
+			// Abort-aware sleep: cancel the wait immediately if the signal fires
+			await new Promise<void>((resolve, reject) => {
+				const id = setTimeout(resolve, backoff);
+				init.signal?.addEventListener(
+					'abort',
+					() => {
+						clearTimeout(id);
+						reject(
+							init.signal!.reason instanceof Error
+								? init.signal!.reason
+								: new DOMException('Aborted', 'AbortError')
+						);
+					},
+					{ once: true }
+				);
+			});
+			backoff *= 2;
+		}
+	}
+}
+
 
 /**
  * POST JSON data to an API endpoint.

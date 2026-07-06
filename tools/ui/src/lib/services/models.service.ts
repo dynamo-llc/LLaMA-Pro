@@ -90,6 +90,16 @@ export class ModelsService {
 	}
 
 	/**
+	 * Start downloading a model (ROUTER mode only).
+	 * Sends POST request to `/models`.
+	 *
+	 * @param modelId - Model identifier to download
+	 */
+	static async download(modelId: string): Promise<any> {
+		return apiPost<any>(API_MODELS.DOWNLOAD, { model: modelId });
+	}
+
+	/**
 	 *
 	 *
 	 * Status

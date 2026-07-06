@@ -23,6 +23,7 @@
 	import { ServerModelStatus } from '$lib/enums';
 
 	import { hasAgenticContent } from '$lib/utils';
+	import { getDaemonUrl } from '$lib/utils/get-base-url';
 
 	interface Props {
 		class?: string;
@@ -415,7 +416,7 @@
 				if (idx > 0 && messages[idx - 1].role === MessageRole.USER) {
 					prompt = messages[idx - 1].content;
 				}
-				fetch('http://127.0.0.1:50054/feedback', {
+				fetch(`${getDaemonUrl('echo')}/feedback`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ prompt, chosen: message.content, rejected: '' })
@@ -468,7 +469,7 @@
 						if (idx > 0 && messages[idx - 1].role === MessageRole.USER) {
 							prompt = messages[idx - 1].content;
 						}
-						fetch('http://127.0.0.1:50054/feedback', {
+						fetch(`${getDaemonUrl('echo')}/feedback`, {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
 							body: JSON.stringify({ prompt, chosen: rewriteContent, rejected: message.content })

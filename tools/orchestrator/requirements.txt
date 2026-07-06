@@ -5,3 +5,5 @@ langchain-openai
 pydantic
 simpleeval
 piper-tts
+faster-whisper
+python-multipart

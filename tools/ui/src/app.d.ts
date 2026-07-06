@@ -144,6 +144,8 @@ declare global {
 		idxCodeBlock?: number;
 		llamaPort?: string;
 		orchestratorPort?: string;
+		latticaPort?: string;
+		echoPort?: string;
 		electronAPI?: any;
 	}
 }

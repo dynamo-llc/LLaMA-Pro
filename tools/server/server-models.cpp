@@ -50,6 +50,21 @@ extern char **environ;
 #define CMD_ROUTER_TO_CHILD_EXIT  "cmd_router_to_child:exit"
 #define CMD_CHILD_TO_ROUTER_STATE "cmd_child_to_router:state:" // followed by json string
 
+static bool is_virtual_model(const std::string & name) {
+    if (name == "swarm-ensemble") return true;
+    size_t colon_pos = name.find(':');
+    // Ignore colons at index 1 to allow Windows absolute paths (e.g. C:\path\to\model)
+    if (colon_pos == std::string::npos || colon_pos <= 1) return false;
+    
+    // If there is a slash before the colon, it's likely a HuggingFace repo with a quant specifier
+    // (e.g. "unsloth/Llama-3.2-1B-Instruct-GGUF:Q4_K_M") rather than a virtual model API (e.g. "openrouter:model")
+    size_t slash_pos = name.find('/');
+    if (slash_pos != std::string::npos && slash_pos < colon_pos) {
+        return false;
+    }
+    return true;
+}
+
 // address for child process, this is needed because router may run on 0.0.0.0
 // ref: https://github.com/ggml-org/llama.cpp/issues/17862
 #define CHILD_ADDR "127.0.0.1"
@@ -200,7 +215,7 @@ static std::vector<std::string> get_environment() {
 }
 
 void server_model_meta::update_args(common_preset_context & ctx_preset, std::string bin_path) {
-    if (name.find(':') != std::string::npos || name == "swarm-ensemble") {
+    if (is_virtual_model(name)) {
         args = {};
         return;
     }
@@ -222,7 +237,7 @@ void server_model_meta::update_args(common_preset_context & ctx_preset, std::str
 }
 
 void server_model_meta::update_caps() {
-    if (name.find(':') != std::string::npos || name == "swarm-ensemble") {
+    if (is_virtual_model(name)) {
         multimodal = { false, false };
         return;
     }
@@ -716,7 +731,7 @@ std::optional<server_model_meta> server_models::get_meta(const std::string & nam
         }
     }
 
-    if (!name.empty() && (name == "swarm-ensemble" || name.find(':') != std::string::npos)) {
+    if (!name.empty() && is_virtual_model(name)) {
         server_model_meta meta;
         meta.source = SERVER_MODEL_SOURCE_CACHE;
         meta.name = name;
@@ -846,7 +861,7 @@ void server_models::load(const std::string & name) {
 }
 
 void server_models::load(const std::string & name, const load_options & opts) {
-    if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+    if (is_virtual_model(name)) {
         std::unique_lock<std::mutex> lk(mutex);
         server_model_meta meta;
         if (opts.custom_meta.has_value()) {
@@ -1146,7 +1161,7 @@ void server_models::load(const std::string & name, const load_options & opts) {
 }
 
 void server_models::unload(const std::string & name) {
-    if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+    if (is_virtual_model(name)) {
         update_status(name, { SERVER_MODEL_STATUS_UNLOADED, 0 });
         return;
     }
@@ -1267,7 +1282,7 @@ void server_models::update_download_progress(const std::string & name, const com
 }
 
 bool server_models::remove(const std::string & name) {
-    if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+    if (is_virtual_model(name)) {
         std::lock_guard<std::mutex> lk(mutex);
         mapping.erase(name);
         notify_sse("model_remove", name, {});
@@ -1859,7 +1874,7 @@ void server_models_routes::init_routes() {
         std::string name = json_value(body, "model", std::string());
         auto meta = models.get_meta(name);
         if (!meta.has_value()) {
-            if (name == "swarm-ensemble" || name.find(':') != std::string::npos) {
+            if (is_virtual_model(name)) {
                 server_model_meta new_meta;
                 new_meta.source = SERVER_MODEL_SOURCE_CACHE;
                 new_meta.name = name;

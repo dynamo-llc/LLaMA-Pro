@@ -155,18 +155,23 @@ export class DatabaseService {
 			timestamp: Date.now(),
 			role: MessageRole.SYSTEM,
 			content: trimmedPrompt,
+			// M9: parentId refers to the root node (supplied by caller); root itself is not touched here
 			parent: parentId,
 			children: []
 		};
 
-		await db[IDXDB_TABLES.messages].add(systemMessage);
+		// H7: wrap add + parent-update in a transaction so a crash between them
+		// cannot leave a detached system message with no parent reference.
+		await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
+			await db[IDXDB_TABLES.messages].add(systemMessage);
 
-		const parentMessage = await db[IDXDB_TABLES.messages].get(parentId);
-		if (parentMessage) {
-			await db[IDXDB_TABLES.messages].update(parentId, {
-				children: [...parentMessage.children, systemMessage.id]
-			});
-		}
+			const parentMessage = await db[IDXDB_TABLES.messages].get(parentId);
+			if (parentMessage) {
+				await db[IDXDB_TABLES.messages].update(parentId, {
+					children: [...parentMessage.children, systemMessage.id]
+				});
+			}
+		});
 
 		return systemMessage;
 	}

@@ -10,7 +10,7 @@ import {
 	TOOL_SERVER_LABELS
 } from '$lib/constants';
 
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { SvelteSet } from 'svelte/reactivity';
 
 /** Stable selection identity for a tool, shared by the disabled set and the permission store */
 function toolKey(source: ToolSource, name: string, serverId?: string): string {
@@ -72,8 +72,8 @@ class ToolsStore {
 				DISABLED_TOOL_KEYS_LOCALSTORAGE_KEY,
 				JSON.stringify([...this._disabledTools])
 			);
-		} catch {
-			// ignore storage errors
+		} catch (e) {
+			console.warn('[ToolsStore] Failed to persist disabled tools:', e);
 		}
 	}
 
@@ -150,7 +150,7 @@ class ToolsStore {
 	/** Canonical flat list of tool entries with source metadata and stable keys, deduped by key */
 	get allTools(): ToolEntry[] {
 		const entries: ToolEntry[] = [];
-		const seen = new SvelteSet<string>();
+		const seen = new Set<string>();
 
 		const push = (entry: ToolEntry) => {
 			if (seen.has(entry.key)) return;
@@ -194,7 +194,7 @@ class ToolsStore {
 	/** Tools grouped by category for tree display, derived from the canonical entries */
 	get toolGroups(): ToolGroup[] {
 		const groups: ToolGroup[] = [];
-		const byKey = new SvelteMap<string, ToolGroup>();
+		const byKey = new Map<string, ToolGroup>();
 
 		for (const entry of this.allTools) {
 			const groupKey =
@@ -237,7 +237,7 @@ class ToolsStore {
 	 * The API identifies tools by name, so a name is sent at most once.
 	 */
 	getEnabledToolsForLLM(): OpenAIToolDefinition[] {
-		const enabledNames = new SvelteSet<string>();
+		const enabledNames = new Set<string>();
 		for (const entry of this.allTools) {
 			if (!this._disabledTools.has(entry.key)) {
 				enabledNames.add(entry.definition.function.name);
@@ -245,7 +245,7 @@ class ToolsStore {
 		}
 
 		const result: OpenAIToolDefinition[] = [];
-		const seen = new SvelteSet<string>();
+		const seen = new Set<string>();
 
 		const take = (def: OpenAIToolDefinition) => {
 			const name = def.function.name;
@@ -301,6 +301,7 @@ class ToolsStore {
 		} else {
 			this._disabledTools.add(key);
 		}
+		this.persistDisabledTools();
 	}
 
 	/** Enable all tools belonging to a specific MCP server */
@@ -318,7 +319,6 @@ class ToolsStore {
 		for (const tool of group.tools) {
 			this.setToolEnabled(tool.key, !allEnabled);
 		}
-		this.persistDisabledTools();
 	}
 
 	isGroupFullyEnabled(group: ToolGroup): boolean {
@@ -362,7 +362,7 @@ class ToolsStore {
 	getToolServerLabel(toolName: string): string {
 		const entry = this.findEntryByName(toolName);
 		if (!entry) return '';
-		if (entry.serverName) return mcpStore.getServerDisplayName(entry.serverName);
+		if (entry.serverId) return mcpStore.getServerDisplayName(entry.serverId);
 		if (entry.source === ToolSource.BUILTIN) return TOOL_SERVER_LABELS[ToolSource.BUILTIN];
 		if (entry.source === ToolSource.CUSTOM) return TOOL_SERVER_LABELS[ToolSource.CUSTOM];
 		if (entry.source === ToolSource.FRONTEND) return TOOL_SERVER_LABELS[ToolSource.FRONTEND];

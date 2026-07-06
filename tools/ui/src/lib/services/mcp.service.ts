@@ -258,6 +258,8 @@ export class MCPService {
 						requestUrlStr = input;
 					} else if (input instanceof URL) {
 						requestUrlStr = input.href;
+					} else if (input instanceof Request) {
+						requestUrlStr = input.url;
 					}
 
 					if (requestUrlStr) {
@@ -512,6 +514,7 @@ export class MCPService {
 					stopPhaseLogging
 				};
 			} catch (sseError) {
+				stopPhaseLogging();
 				const httpMsg = httpError instanceof Error ? httpError.message : String(httpError);
 				const sseMsg = sseError instanceof Error ? sseError.message : String(sseError);
 
@@ -823,7 +826,11 @@ export class MCPService {
 			// Terminate the session first for streamable-http transports to cleanly
 			// close streams, matching the inspector's disconnect flow.
 			if (connection.transport instanceof StreamableHTTPClientTransport) {
-				await connection.transport.terminateSession();
+				try {
+					await connection.transport.terminateSession();
+				} catch (termErr) {
+					console.warn(`[MCPService][${connection.serverName}] terminateSession failed, proceeding with close:`, termErr);
+				}
 			}
 
 			// Clear error handlers before closing to prevent noise from expected

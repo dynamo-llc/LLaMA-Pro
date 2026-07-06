@@ -94,6 +94,14 @@ class MCPStore {
 	private initPromise: Promise<boolean> | null = null;
 	private activeFlowCount = 0;
 
+	// M2: cache isEnabled to avoid rebuilding MCP config on every reactive access
+	private readonly _isEnabled = $derived(
+		(() => {
+			const mcpConfig = this.#buildMcpClientConfig(config());
+			return mcpConfig !== null && mcpConfig !== undefined && Object.keys(mcpConfig.servers).length > 0;
+		})()
+	);
+
 	get isProxyAvailable(): boolean {
 		return serverStore.props?.cors_proxy_enabled ?? false;
 	}
@@ -291,10 +299,7 @@ class MCPStore {
 	}
 
 	get isEnabled(): boolean {
-		const mcpConfig = this.#buildMcpClientConfig(config());
-		return (
-			mcpConfig !== null && mcpConfig !== undefined && Object.keys(mcpConfig.servers).length > 0
-		);
+		return this._isEnabled;
 	}
 
 	get availableTools(): string[] {
@@ -392,9 +397,16 @@ class MCPStore {
 	/**
 	 * Validates that an icon URI uses a safe scheme (https: or data:).
 	 */
+	// L2: validate data: URIs against the allowed MIME set
 	#isValidIconUri(src: string): boolean {
 		try {
-			if (src.startsWith(UrlProtocol.DATA)) return true;
+			if (src.startsWith(UrlProtocol.DATA)) {
+				// data:<mime>;base64,... - extract MIME from prefix
+				const mimeEnd = src.indexOf(';');
+				if (mimeEnd === -1) return false;
+				const mime = src.slice(UrlProtocol.DATA.length, mimeEnd);
+				return MCP_ALLOWED_ICON_MIME_TYPES.has(mime);
+			}
 
 			const url = new URL(src);
 
@@ -603,16 +615,19 @@ class MCPStore {
 
 	private async initialize(signature: string, mcpConfig: MCPClientConfig): Promise<boolean> {
 		this.updateState({ isInitializing: true, error: null });
-		this.configSignature = signature;
 
 		const serverEntries = Object.entries(mcpConfig.servers);
 
 		if (serverEntries.length === 0) {
+			this.configSignature = signature;
 			this.updateState({ isInitializing: false, toolCount: 0, connectedServers: [] });
 
 			return false;
 		}
+		// H1: assign initPromise before configSignature so concurrent callers see
+		// a non-null promise and join it instead of triggering a second init.
 		this.initPromise = this.doInitialize(signature, mcpConfig, serverEntries);
+		this.configSignature = signature;
 
 		return this.initPromise;
 	}
@@ -639,7 +654,7 @@ class MCPStore {
 						// Handle WebSocket disconnection
 						if (phase === MCPConnectionPhase.DISCONNECTED) {
 							console.log(`[MCPStore][${name}] Connection lost, starting auto-reconnect`);
-							this.autoReconnect(name);
+							void this.autoReconnect(name); // H2: explicit fire-and-forget
 						}
 					},
 					listChangedHandlers
@@ -726,9 +741,12 @@ class MCPStore {
 			return;
 		}
 
+		// M1: collect keys first to avoid mutating the map during iteration
+		const keysToDelete: string[] = [];
 		for (const [toolName, ownerServer] of this.toolsIndex.entries()) {
-			if (ownerServer === serverName) this.toolsIndex.delete(toolName);
+			if (ownerServer === serverName) keysToDelete.push(toolName);
 		}
+		for (const key of keysToDelete) this.toolsIndex.delete(key);
 
 		connection.tools = tools;
 
@@ -883,8 +901,10 @@ class MCPStore {
 				try {
 					// Per-attempt timeout: reject if the server doesn't respond in time,
 					// then fall through to backoff logic as with any other failure.
-					const timeoutPromise = new Promise<never>((_, reject) =>
-						setTimeout(
+					// C2: capture timerId so it can be cleared once the race settles
+					let reconnectTimerId: ReturnType<typeof setTimeout>;
+					const timeoutPromise = new Promise<never>((_, reject) => {
+						reconnectTimerId = setTimeout(
 							() =>
 								reject(
 									new Error(
@@ -892,8 +912,8 @@ class MCPStore {
 									)
 								),
 							MCP_RECONNECT_ATTEMPT_TIMEOUT_MS
-						)
-					);
+						);
+					});
 
 					needsReconnect = false;
 					const listChangedHandlers = this.createListChangedHandlers(serverName);
@@ -919,6 +939,7 @@ class MCPStore {
 					);
 
 					const connection = await Promise.race([connectPromise, timeoutPromise]);
+					clearTimeout(reconnectTimerId!); // C2: cancel timer once race settles
 
 					// Replace old connection with new one
 					this.connections.set(serverName, connection);
