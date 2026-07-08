@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import {
 		ChatScreenForm,
 		ChatMessages,
@@ -28,7 +29,8 @@
 	import {
 		conversationsStore,
 		activeMessages,
-		activeConversation
+		activeConversation,
+		conversations
 	} from '$lib/stores/conversations.svelte';
 	import { config } from '$lib/stores/settings.svelte';
 	import { serverLoading, serverError } from '$lib/stores/server.svelte';
@@ -38,6 +40,7 @@
 	import ChatScreenActionScrollDown from './ChatScreenActionScrollDown.svelte';
 	import ChatScreenDialogsAndAlerts from './ChatScreenDialogsAndAlerts.svelte';
 	import { ROUTES } from '$lib/constants';
+	import { RouterService } from '$lib/services/router.service';
 
 	let { showCenteredEmpty = false } = $props();
 
@@ -320,6 +323,22 @@
 				onSystemPromptAdd={handleSystemPromptAdd}
 				bind:uploadedFiles={fileUpload.uploadedFiles}
 			/>
+
+			{#if isEmpty && conversations().length > 0}
+				<div class="mt-8 flex flex-col items-center pointer-events-auto pb-8">
+					<h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Recent Conversations</h3>
+					<div class="flex flex-col gap-2 w-full max-w-md">
+						{#each conversations().slice(0, 5) as conv}
+							<button
+								class="px-5 py-3 bg-card hover:bg-muted border border-border/40 rounded-xl text-sm w-full text-center transition-colors truncate shadow-sm"
+								onclick={() => goto(RouterService.chat(conv.id))}
+							>
+								{conv.name || 'Empty Chat'}
+							</button>
+						{/each}
+					</div>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

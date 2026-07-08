@@ -28,30 +28,7 @@ export const SIDEBAR_ACTIONS_ITEMS: DesktopIconStripItem[] = [
 	},
 	{ icon: SquarePen, tooltip: 'Models Chat', route: ROUTES.NEW_CHAT, keys: ['shift', 'cmd', 'o'] },
 	{ icon: Search, tooltip: 'Search', keys: ['cmd', 'k'] },
-	{
-		icon: McpLogo,
-		tooltip: 'MCP Servers',
-		route: ROUTES.MCP_SERVERS,
-		activeRouteId: '/mcp-servers'
-	},
-	{
-		icon: Files,
-		tooltip: 'Model Management',
-		route: ROUTES.MODELS,
-		activeRouteId: '/models'
-	},
-	{
-		icon: Activity,
-		tooltip: 'Telemetry',
-		route: ROUTES.TELEMETRY,
-		activeRouteId: '/telemetry'
-	},
-	{
-		icon: Terminal,
-		tooltip: 'Live Terminal',
-		route: ROUTES.TERMINAL,
-		activeRouteId: '/terminal'
-	},
+
 	{
 		icon: Newspaper,
 		tooltip: 'News & Discoveries',

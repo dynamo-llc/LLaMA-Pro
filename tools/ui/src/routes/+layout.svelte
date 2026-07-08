@@ -529,7 +529,7 @@
 						<div class="h-3 w-px bg-border"></div>
 						<div class="flex flex-col items-start">
 							<span class="text-[9px] md:text-[10px] text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-md leading-tight">
-								Distributed Ai Engine 2.0.6
+								Distributed Ai Engine 2.0.7
 							</span>
 							<span class="text-[8px] text-muted-foreground px-2 pt-0.5 opacity-70">
 								&nbsp;&nbsp;by <a href="http://www.dynamo.llc" target="_blank" rel="noopener noreferrer" class="hover:text-primary transition-colors cursor-pointer underline underline-offset-2">Dynamo.llc</a>
@@ -550,30 +550,7 @@
 						</div>
 					</div>
 
-					<!-- Right: Token Speed Telemetry -->
-					<div class="flex items-center gap-2">
-						<div
-							class="bg-muted/85 border border-border/70 rounded-md px-2 py-0.5 flex items-center gap-1.5 shadow-xs text-[9px] md:text-[10px] font-mono"
-						>
-							<span class="text-muted-foreground uppercase text-[8px] md:text-[9px] font-semibold"
-								>Speed</span
-							>
-							<span class="font-bold text-foreground"
-								>{sessionTelemetryStore.latestSpeed > 0
-									? sessionTelemetryStore.latestSpeed.toFixed(1) + ' t/s'
-									: '---'}</span
-							>
-							<div class="h-2.5 w-px bg-border mx-0.5"></div>
-							<span class="text-muted-foreground uppercase text-[8px] md:text-[9px] font-semibold"
-								>Avg</span
-							>
-							<span class="font-bold text-pink-500 dark:text-pink-400"
-								>{sessionTelemetryStore.getAverageSpeed() > 0
-									? sessionTelemetryStore.getAverageSpeed().toFixed(1) + ' t/s'
-									: '---'}</span
-							>
-						</div>
-					</div>
+
 				</div>
 
 				<!-- Global Locked Submenu Header Area (Sticky, locked directly below title bar) -->
@@ -626,18 +603,6 @@
 	/>
 </Tooltip.Provider>
 
-<!-- Floating Companion Orb Toggle -->
-{#if !companionStore.isOpen}
-	<button 
-		class="fixed bottom-4 right-4 z-[9900] group flex items-center justify-center w-14 h-14 rounded-full bg-black hover:bg-black/80 border border-primary/30 shadow-[0_0_20px_rgba(0,210,255,0.2)] hover:shadow-[0_0_30px_rgba(0,210,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95"
-		onclick={() => companionStore.open()}
-		aria-label="Summon Companion"
-	>
-		<div class="absolute inset-0 rounded-full bg-primary/20 blur-md group-hover:bg-primary/40 transition-colors"></div>
-		<div class="absolute inset-0 rounded-full bg-gradient-to-br from-white/20 to-transparent"></div>
-		<Bot class="w-6 h-6 text-primary relative z-10 animate-pulse" style="animation-duration: 3s;" />
-	</button>
-{/if}
 
 <!-- PWA update prompt + version -->
 <div class="fixed right-4 bottom-4 z-9999 flex flex-col items-end gap-1">

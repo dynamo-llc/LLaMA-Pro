@@ -51,7 +51,12 @@ class ModelsStore {
 	loading = $state(false);
 	updating = $state(false);
 	error = $state<string | null>(null);
-	selectedModelId = $state<string | null>(null);
+	public selectedModelId: string | null = $state(null);
+
+	/** Track download progress across the app */
+	public downloadProgress = $state(
+		new Map<string, { done: number; total: number; startTime: number; speed: number }>()
+	);
 	selectedModelName = $state<string | null>(null);
 	activeRpcPeers = $state<{ id: string; name: string; endpoint: string }[]>([]);
 
@@ -723,6 +728,10 @@ class ModelsStore {
 		return this.loadProgress.get(modelId) ?? null;
 	}
 
+	getDownloadProgress(modelId: string): { done: number; total: number; startTime: number; speed: number } | null {
+		return this.downloadProgress.get(modelId) ?? null;
+	}
+
 	/**
 	 * Read the feed and reconnect until unsubscribed. Splits the byte stream
 	 * into SSE records on the blank line boundary.
@@ -810,7 +819,42 @@ class ModelsStore {
 			case ServerModelsSseEventType.MODEL_REMOVE:
 				this.removeRouterModel(event.model);
 				break;
-			case ServerModelsSseEventType.DOWNLOAD_PROGRESS:
+			case ServerModelsSseEventType.DOWNLOAD_PROGRESS: {
+				const data = event.data;
+				let done = 0;
+				let total = 0;
+				if (data && data.progress) {
+					for (const key in data.progress) {
+						done += data.progress[key].done || 0;
+						total += data.progress[key].total || 0;
+					}
+				}
+				if (total > 0) {
+					const existing = this.downloadProgress.get(event.model);
+					const startTime = existing?.startTime || Date.now();
+					let speed = existing?.speed || 0;
+
+					if (done > 0 && done > (existing?.done || 0)) {
+						const elapsedSeconds = (Date.now() - startTime) / 1000;
+						if (elapsedSeconds > 0.5) {
+							speed = done / elapsedSeconds;
+						}
+					}
+
+					this.downloadProgress.set(event.model, { done, total, startTime, speed });
+					this.downloadProgress = new Map(this.downloadProgress);
+				}
+				break;
+			}
+			case ServerModelsSseEventType.DOWNLOAD_FINISHED:
+				this.downloadProgress.delete(event.model);
+				this.downloadProgress = new Map(this.downloadProgress);
+				void this.fetchRouterModels();
+				break;
+			case ServerModelsSseEventType.DOWNLOAD_FAILED:
+				this.downloadProgress.delete(event.model);
+				this.downloadProgress = new Map(this.downloadProgress);
+				void this.fetchRouterModels();
 				break;
 		}
 	}

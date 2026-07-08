@@ -100,6 +100,18 @@ export class ModelsService {
 	}
 
 	/**
+	 * Delete a downloaded model from cache (ROUTER mode only).
+	 * Sends DELETE request to `/models?model={modelId}`.
+	 *
+	 * @param modelId - Model identifier to delete
+	 */
+	static async delete(modelId: string): Promise<any> {
+		return apiFetch<any>(`${API_MODELS.DOWNLOAD}?model=${encodeURIComponent(modelId)}`, {
+			method: 'DELETE'
+		});
+	}
+
+	/**
 	 *
 	 *
 	 * Status

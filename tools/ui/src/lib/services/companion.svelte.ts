@@ -2,6 +2,7 @@ import { modelsStore } from '$lib/stores/models.svelte';
 import { toast } from 'svelte-sonner';
 import { getBaseUrl } from '$lib/utils/get-base-url';
 import { personas, type Persona } from './personas';
+import { jarvisBackend } from './jarvis-backend.service';
 
 export interface CompanionMessage {
     role: 'system' | 'user' | 'assistant' | 'tool';
@@ -154,6 +155,8 @@ class CompanionState {
     messages = $state<CompanionMessage[]>([]);
     isThinking = $state(false);
     activeResponse = $state('');
+    activeToolCall = $state<{ name: string, args: string, status: 'running' | 'completed' | 'error' } | null>(null);
+    ttsQueue: string[] = [];
 
     // Global UI state
     isOpen = $state(false);
@@ -171,10 +174,137 @@ class CompanionState {
     selectedVoiceURI = $state('');
     humorLevel = $state(50); // 0 = strict, 100 = sarcastic/humorous
     verbosityLevel = $state(50); // 0 = succinct, 100 = verbose
-    
+
+    // Reactive persona roster: built-ins plus user-created personas
+    // (kept in sync with the jarvis voice backend when it is online).
+    personaList = $state<Persona[]>([...personas]);
+
     // getActivePersona getter
     get activePersona(): Persona | undefined {
-        return personas.find(p => p.id === this.activePersonaId) || personas[0];
+        return this.personaList.find(p => p.id === this.activePersonaId) || this.personaList[0];
+    }
+
+    /** Add a persona to the roster (no-op if the id already exists). */
+    registerPersona(persona: Persona) {
+        if (!this.personaList.some(p => p.id === persona.id)) {
+            this.personaList = [...this.personaList, persona];
+        }
+    }
+
+    /** Patch a roster persona in place (name, prompt, voice settings...). */
+    updatePersonaLocal(id: string, patch: Partial<Persona>) {
+        const index = this.personaList.findIndex(p => p.id === id);
+        if (index !== -1) {
+            this.personaList[index] = { ...this.personaList[index], ...patch };
+        }
+    }
+
+    /** Remove a user persona from the roster. */
+    removePersonaLocal(id: string) {
+        this.personaList = this.personaList.filter(p => p.id !== id);
+        if (this.activePersonaId === id && this.personaList.length > 0) {
+            this.activePersonaId = this.personaList[0].id;
+        }
+    }
+
+    /** Switch persona and mirror the switch to the voice backend. */
+    setActivePersona(id: string) {
+        if (this.activePersonaId === id) return;
+        this.activePersonaId = id;
+        this.clearConversation();
+        this.triggerWelcome();
+        // Best-effort: the voice backend may not be running.
+        jarvisBackend.activatePersona(id).catch(() => {});
+    }
+
+    // -- live voice-backend bridge -------------------------------------------
+
+    backendConnected = $state(false);
+    backendLatency = $state<{
+        turn_id: string;
+        speech_end_to_first_audio_ms: number;
+        transcript_to_first_token_ms: number;
+    } | null>(null);
+    backendHeard = $state(''); // live partial/final transcript from the backend
+    private backendEventsStarted = false;
+
+    /** Stream backend events: keeps the carousel, HUD, and latency in sync. */
+    connectBackendEvents() {
+        if (this.backendEventsStarted) return;
+        this.backendEventsStarted = true;
+        jarvisBackend.connectEvents(
+            (event) => {
+                switch (event.type) {
+                    case 'persona_switched': {
+                        // Voice-initiated switch ("Denise, ..."): follow locally
+                        // without echoing the activation back to the backend.
+                        const id = event.payload as string;
+                        if (id && id !== this.activePersonaId && this.personaList.some(p => p.id === id)) {
+                            this.activePersonaId = id;
+                        }
+                        break;
+                    }
+                    case 'wake_word_detected':
+                        this.showToast(
+                            event.payload ? `WAKE SIGNAL // ${String(event.payload).toUpperCase()}` : 'WAKE SIGNAL',
+                            'info'
+                        );
+                        break;
+                    case 'stt_partial':
+                    case 'stt_final': {
+                        const transcript = event.payload as { text?: string } | null;
+                        if (transcript?.text) this.backendHeard = transcript.text;
+                        break;
+                    }
+                    case 'interrupted':
+                        this.showToast('TRANSMISSION INTERRUPTED', 'warning');
+                        break;
+                    case 'latency_report':
+                        this.backendLatency = event.payload as CompanionState['backendLatency'];
+                        break;
+                }
+            },
+            (connected) => {
+                this.backendConnected = connected;
+            }
+        );
+    }
+
+    /**
+     * Pull user-created personas from the voice backend into the roster
+     * (e.g. ones created by YAML or voice command) and mirror the active
+     * persona. Silently no-ops when the backend is offline.
+     */
+    async syncWithBackend() {
+        try {
+            const backendPersonas = await jarvisBackend.listPersonas();
+            for (const bp of backendPersonas) {
+                const appId = (bp.meta?.['app_id'] as string) ?? bp.name;
+                if (bp.builtin && !bp.meta?.['app_id']) continue; // backend-only builtins
+                if (this.personaList.some(p => p.id === appId)) continue;
+                this.registerPersona({
+                    id: appId,
+                    name: bp.display_name,
+                    title: bp.title || 'Custom Agent',
+                    department: bp.department || 'User Defined',
+                    description: bp.description,
+                    prompt: bp.system_prompt,
+                    avatarUrl: (bp.meta?.['avatarUrl'] as string) ?? '',
+                    videoUrl: bp.meta?.['videoUrl'] as string | undefined,
+                    voiceSettings: {
+                        pitch: 1.0,
+                        rate: 1.0,
+                        voiceRegex: /./i,
+                        kokoroVoiceId: (bp.meta?.['kokoroVoiceId'] as string) ?? 'af_bella',
+                        kokoroSpeed: (bp.meta?.['kokoroSpeed'] as number) ?? 1.0
+                    }
+                });
+            }
+            jarvisBackend.activatePersona(this.activePersonaId).catch(() => {});
+            this.connectBackendEvents();
+        } catch (e) {
+            console.debug('Voice backend offline, running standalone', e);
+        }
     }
     
     activeAudio = $state<HTMLAudioElement | null>(null);
@@ -232,6 +362,9 @@ class CompanionState {
         if (this.activeAudio) {
             try {
                 this.activeAudio.pause();
+                if (this.activeAudio.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(this.activeAudio.src);
+                }
             } catch(e) {}
             this.activeAudio = null;
         }
@@ -244,8 +377,7 @@ class CompanionState {
     constructor() {
         if (typeof window !== 'undefined') {
             try {
-                const savedName = localStorage.getItem('companion_name_v2');
-                const savedPersona = localStorage.getItem('companion_persona_v2');
+
                 const savedVoice = localStorage.getItem('companion_voice');
                 const savedHumor = localStorage.getItem('companion_humor');
                 const savedVerbosity = localStorage.getItem('companion_verbosity');
@@ -421,19 +553,12 @@ class CompanionState {
         return applyContextWindow(res);
     }
 
-    setPersona() {
-        const persona = this.compilePersona();
-        if (this.messages.length === 0 || this.messages[0].role !== 'system') {
-            this.messages.unshift({ role: 'system', content: persona });
-        } else {
-            this.messages[0].content = persona;
-        }
-    }
+
 
     async sendMessage(text: string, imageBase64?: string | null) {
         // Stop any ongoing speech immediately when user sends a new message
         this.stopSpeaking();
-        this.setPersona();
+        this.backendHeard = '';
         
         let content: any = text;
         const lowerText = text.toLowerCase();
@@ -471,7 +596,6 @@ class CompanionState {
     async triggerWelcome(retries = 5): Promise<void> {
         // Skip welcome if there are already persisted messages
         if (this.messages.filter(m => m.role !== 'system').length > 0) return;
-        this.setPersona();
         const p = this.activePersona;
         this.messages.push({ 
             role: 'user', 
@@ -503,10 +627,13 @@ class CompanionState {
 
         try {
             const endpoint = `${getBaseUrl('orchestrator')}/v1/tts`;
+            const persona = this.activePersona;
+            const voice = this.selectedVoiceURI || persona?.voiceSettings?.kokoroVoiceId || 'af_sarah';
+            const speed = persona?.voiceSettings?.kokoroSpeed ?? 1.0;
             const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: spoken, voice: this.selectedVoiceURI || 'en_GB-alan-medium' }),
+                body: JSON.stringify({ text: spoken, voice, speed }),
                 signal
             });
             if (!res.ok) return null;
@@ -544,21 +671,28 @@ class CompanionState {
         this.ttsAbortController = new AbortController();
         const signal = this.ttsAbortController.signal;
 
-        // Kick off a prefetch for the first chunk immediately
-        let prefetch: Promise<HTMLAudioElement | null> | null =
+        // 2-ahead prefetch pipeline
+        let prefetch1: Promise<HTMLAudioElement | null> | null =
             this.audioQueue.length > 0 ? this.fetchTtsAudio(this.audioQueue[0], signal) : null;
+        let prefetch2: Promise<HTMLAudioElement | null> | null =
+            this.audioQueue.length > 1 ? this.fetchTtsAudio(this.audioQueue[1], signal) : null;
 
         while (this.audioQueue.length > 0) {
             const text = this.audioQueue.shift();
             if (!text) continue;
 
             // Await the prefetch that was started for this chunk
-            const prebuilt = prefetch ? await prefetch : null;
+            const prebuilt = prefetch1 ? await prefetch1 : null;
 
-            // Immediately kick off prefetch for the NEXT chunk while we play the current one
-            prefetch = this.audioQueue.length > 0
-                ? this.fetchTtsAudio(this.audioQueue[0], signal)
+            // Shift pipeline: promote prefetch2, kick off a new one for queue[1]
+            prefetch1 = prefetch2;
+            prefetch2 = this.audioQueue.length > 1
+                ? this.fetchTtsAudio(this.audioQueue[1], signal)
                 : null;
+            // If pipeline was empty but queue has items, fill prefetch1
+            if (!prefetch1 && this.audioQueue.length > 0) {
+                prefetch1 = this.fetchTtsAudio(this.audioQueue[0], signal);
+            }
 
             if (prebuilt) {
                 await this.playAudioElement(prebuilt, text);
@@ -741,6 +875,15 @@ class CompanionState {
                     if (trimmedLine.startsWith("data: ") && trimmedLine !== "data: [DONE]") {
                         try {
                             const data = JSON.parse(trimmedLine.substring(6));
+                            if (data.error) {
+                                const errMsg = typeof data.error === 'string'
+                                    ? data.error
+                                    : data.error.message || 'Streaming error from server';
+                                toast.error(errMsg);
+                                fullContent = errMsg;
+                                this.activeResponse = fullContent;
+                                continue;
+                            }
                             const delta = data?.choices?.[0]?.delta;
                             if (!delta) continue;
                             
@@ -804,6 +947,7 @@ class CompanionState {
                     tool_calls: [{ id: toolCallId || 'call_0', type: 'function', function: { name: toolCallName, arguments: toolCallArgs } }]
                 });
 
+                this.activeToolCall = { name: toolCallName, args: toolCallArgs, status: 'running' };
                 this.showToast(`TOOL: ${toolCallName.toUpperCase()}`, 'info');
 
                 let toolResult = '';
@@ -823,10 +967,28 @@ class CompanionState {
                     } else if (toolCallName === 'self_repair') {
                         const result = await this.runSelfRepair();
                         toolResult = result.message || result.status;
+                    } else if (toolCallName.startsWith('mcp_')) {
+                        // Forward to orchestrator MCP execution
+                        const res3 = await fetch(`${getBaseUrl('orchestrator')}/v1/mcp/execute`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ server_name: toolCallName.split('_')[1], tool_name: toolCallName.split('_').slice(2).join('_'), arguments: args })
+                        });
+                        const data = await res3.json();
+                        toolResult = JSON.stringify(data);
                     }
+                    
+                    this.activeToolCall = { name: toolCallName, args: toolCallArgs, status: 'completed' };
                 } catch (toolErr: any) {
                     toolResult = `Error: ${toolErr?.message || 'Tool execution failed.'}`;
+                    this.activeToolCall = { name: toolCallName, args: toolCallArgs, status: 'error' };
                 }
+                
+                setTimeout(() => {
+                    if (this.activeToolCall?.name === toolCallName) {
+                        this.activeToolCall = null;
+                    }
+                }, 3000);
 
                 this.messages.push({ role: 'tool', content: toolResult, tool_call_id: toolCallId || 'call_0', name: toolCallName });
                 this.persistMessages();
@@ -893,7 +1055,6 @@ class CompanionState {
         const realIdx = this.messages.length - 1 - lastIdx;
         this.messages.splice(realIdx, 1);
         this.persistMessages();
-        this.setPersona();
         await this.streamLLMResponse(0, true);
     }
 
@@ -1054,6 +1215,8 @@ class CompanionState {
             clearTimeout(this._initTimerId);
             this._initTimerId = null;
         }
+        jarvisBackend.disconnectEvents();
+        this.backendEventsStarted = false;
     }
 }
 

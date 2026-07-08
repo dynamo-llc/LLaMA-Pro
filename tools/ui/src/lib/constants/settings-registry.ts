@@ -17,7 +17,9 @@ import {
 	Globe,
 	Terminal,
 	Palette,
-	Smartphone
+	Smartphone,
+	Files,
+	Activity
 } from '@lucide/svelte';
 import type { Component } from 'svelte';
 import type {
@@ -46,7 +48,10 @@ export const SETTINGS_SECTION_TITLES = {
 	DEVELOPER: 'Developer',
 	ECHO: 'Echo Alignment',
 	MESH: 'Mesh Network',
-	TUNNEL: 'Edge Devices'
+	TUNNEL: 'Edge Devices',
+	MODELS: 'Model Management',
+	TELEMETRY: 'Telemetry',
+	TERMINAL: 'Live Terminal'
 } as const;
 
 const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Component }[] = [
@@ -70,6 +75,26 @@ const STANDALONE_SECTIONS: { title: SettingsSectionTitle; slug: string; icon: Co
 		title: SETTINGS_SECTION_TITLES.TUNNEL,
 		slug: SETTINGS_SECTION_SLUGS.TUNNEL,
 		icon: Smartphone
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.MCP,
+		slug: SETTINGS_SECTION_SLUGS.MCP,
+		icon: McpLogo
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.MODELS,
+		slug: SETTINGS_SECTION_SLUGS.MODELS,
+		icon: Files
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.TELEMETRY,
+		slug: SETTINGS_SECTION_SLUGS.TELEMETRY,
+		icon: Activity
+	},
+	{
+		title: SETTINGS_SECTION_TITLES.TERMINAL,
+		slug: SETTINGS_SECTION_SLUGS.TERMINAL,
+		icon: Terminal
 	}
 ];
 

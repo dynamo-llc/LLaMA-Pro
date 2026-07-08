@@ -8,8 +8,12 @@
 		SettingsChatEchoTab,
 		SettingsLatticaTab,
 		SettingsTunnelTab,
-		SettingsFooter
+		SettingsFooter,
+		SettingsMcpServers
 	} from '$lib/components/app/settings';
+	import ModelsScreen from '$lib/components/app/models/ModelsScreen.svelte';
+	import TelemetryScreen from '$lib/components/app/telemetry/TelemetryScreen.svelte';
+	import TerminalScreen from '$lib/components/app/terminal/TerminalScreen.svelte';
 	import { config, settingsStore } from '$lib/stores/settings.svelte';
 	import {
 		NUMERIC_FIELDS,
@@ -47,6 +51,15 @@
 	);
 
 	let localConfig: SettingsConfigType = $state({ ...config() });
+
+	let isFullWidthSection = $derived(
+		[
+			SETTINGS_SECTION_TITLES.MODELS,
+			SETTINGS_SECTION_TITLES.TELEMETRY,
+			SETTINGS_SECTION_TITLES.TERMINAL,
+			SETTINGS_SECTION_TITLES.MCP
+		].includes(currentSection.title)
+	);
 
 	let mobileHeader: { updateCarousel: () => void } | undefined;
 
@@ -146,9 +159,9 @@
 			bind:this={mobileHeader}
 		/>
 
-		<div class="mx-auto max-w-3xl flex-1">
-			<div class="space-y-6 p-4 md:p-6 md:pt-8">
-				<div class="grid">
+		<div class="mx-auto {isFullWidthSection ? 'w-full max-w-[1920px]' : 'max-w-3xl'} flex-1">
+			<div class="{isFullWidthSection ? '' : 'space-y-6 p-4 md:p-6 md:pt-8'}">
+				<div class="grid h-full">
 					{#if currentSection.title === SETTINGS_SECTION_TITLES.TOOLS}
 						<SettingsChatToolsTab />
 					{:else if currentSection.title === SETTINGS_SECTION_TITLES.IMPORT_EXPORT}
@@ -159,6 +172,14 @@
 						<SettingsLatticaTab />
 					{:else if currentSection.title === SETTINGS_SECTION_TITLES.TUNNEL}
 						<SettingsTunnelTab />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.MODELS}
+						<ModelsScreen />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.TELEMETRY}
+						<TelemetryScreen />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.TERMINAL}
+						<TerminalScreen />
+					{:else if currentSection.title === SETTINGS_SECTION_TITLES.MCP}
+						<SettingsMcpServers class="mx-auto w-full px-4 pb-4 pt-2 md:px-8 md:pb-8 md:pt-2" />
 					{:else if currentSection.fields}
 						<div class="space-y-6">
 							<SettingsChatFields
@@ -180,12 +201,16 @@
 					{/if}
 				</div>
 
-				<div class="mt-8 border-t border-border/30 pt-6">
-					<p class="text-xs text-muted-foreground">Settings are saved in browser's localStorage</p>
-				</div>
+				{#if !isFullWidthSection}
+					<div class="mt-8 border-t border-border/30 pt-6">
+						<p class="text-xs text-muted-foreground">Settings are saved in browser's localStorage</p>
+					</div>
+				{/if}
 			</div>
 
-			<SettingsFooter onReset={handleReset} onSave={handleSave} />
+			{#if !isFullWidthSection}
+				<SettingsFooter onReset={handleReset} onSave={handleSave} />
+			{/if}
 		</div>
 	</div>
 </div>

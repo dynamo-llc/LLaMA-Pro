@@ -12,6 +12,7 @@ import subprocess
 import uuid
 import time
 import sys
+import collections
 import threading
 from typing import List, AsyncGenerator, Optional, Dict, Any
 from typing_extensions import TypedDict
@@ -50,6 +51,7 @@ async def lifespan(app_: FastAPI):
     asyncio.create_task(cleanup_stale_peers())
     start_local_mcp_servers()
     news_manager.start_background_fetch()
+    _preload_tts()
     yield
     stop_rpc_server()
     stop_local_mcp_servers()
@@ -275,6 +277,7 @@ def stop_rpc_server():
 
 _mcp_lock = threading.Lock()
 mcp_processes: dict[int, subprocess.Popen] = {}  # port -> process
+mcp_start_times: dict[int, float] = {}  # port -> start_time
 is_shutting_down = False
 ghost_protocol = False
 daemon_loop = False
@@ -302,16 +305,36 @@ def monitor_and_restart(cfg):
             env = os.environ.copy()
             if "env" in cfg:
                 env.update(cfg["env"])
-            proc = subprocess.Popen(
-                cfg["cmd"],
-                cwd=cwd,
-                stdout=sys.stdout,
-                stderr=sys.stderr,
-                env=env
-            )
-            with _mcp_lock:
-                mcp_processes[port] = proc
-            proc.wait()
+            cmd = cfg["cmd"]
+            if cfg.get("is_stdio"):
+                proxy_script = os.path.join(BASE_DIR, "tools", "ui", "mcp-proxy.js")
+                if not os.path.exists(proxy_script):
+                    proxy_script = os.path.join(BASE_DIR, "app", "tools", "ui", "mcp-proxy.js") # Fallback for packaged app
+                cmd = ["node", proxy_script, "--port", str(port)] + cmd
+
+            log_dir = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, f"{port}.log")
+
+            with open(log_path, "a", encoding="utf-8") as log_file:
+                log_file.write(f"\n--- Starting {cfg['name']} at {datetime.datetime.now().isoformat()} ---\n")
+                log_file.flush()
+
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    env=env
+                )
+                with _mcp_lock:
+                    mcp_processes[port] = proc
+                    mcp_start_times[port] = time.time()
+                proc.wait()
+                
+                log_file.write(f"\n--- Exited with code {proc.returncode} at {datetime.datetime.now().isoformat()} ---\n")
+                log_file.flush()
+
             with _mcp_lock:
                 if mcp_processes.get(port) is proc:
                     del mcp_processes[port]
@@ -574,6 +597,14 @@ async def add_mcp(request: Request):
             with open(config_path, "r", encoding="utf-8") as f:
                 configs = json.load(f)
         
+        if "port" not in data:
+            # Find a free port starting from 8100
+            port = 8100
+            used_ports = {c.get("port") for c in configs}
+            while port in used_ports or is_port_in_use(port):
+                port += 1
+            data["port"] = port
+
         configs.append(data)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(configs, f, indent=4)
@@ -582,7 +613,7 @@ async def add_mcp(request: Request):
         t = threading.Thread(target=monitor_and_restart, args=(data,), daemon=True)
         t.start()
         
-        return {"status": "success", "message": f"MCP {data.get('name')} installed and started."}
+        return {"status": "success", "message": f"MCP {data.get('name')} installed and started.", "port": data["port"]}
     except Exception as e:
         logger.error(f"Failed to add MCP: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -623,7 +654,113 @@ async def toggle_mcp(port: int, request: Request):
         t.start()
         return {"status": "starting", "port": port}
 
+@app.delete("/api/mcp/{port}")
+async def delete_mcp(port: int, request: Request):
+    # 1. Kill the process if running
+    with _mcp_lock:
+        proc = mcp_processes.get(port)
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        with _mcp_lock:
+            if mcp_processes.get(port) is proc:
+                del mcp_processes[port]
+    
+    # 2. Remove from mcp_configs.json
+    config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                mcp_configs = json.load(f)
+            
+            new_configs = [c for c in mcp_configs if c.get("port") != port]
+            
+            if len(new_configs) != len(mcp_configs):
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(new_configs, f, indent=4)
+        except Exception as e:
+            logger.error(f"Failed to remove MCP config for port {port}: {e}")
+            return JSONResponse({"error": f"Failed to remove from config: {e}"}, status_code=500)
 
+    return {"status": "deleted", "port": port}
+
+@app.get("/api/mcp/status")
+async def mcp_status():
+    status_map = {}
+    config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
+    
+    # Check what is in the config
+    mcp_configs = []
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                mcp_configs = json.load(f)
+        except Exception:
+            pass
+            
+    with _mcp_lock:
+        for cfg in mcp_configs:
+            port = cfg.get("port")
+            if not port:
+                continue
+            proc = mcp_processes.get(port)
+            if proc is not None and proc.poll() is None:
+                uptime = time.time() - mcp_start_times.get(port, time.time())
+                status_map[str(port)] = {"status": "running", "uptime_seconds": uptime}
+            else:
+                status_map[str(port)] = {"status": "crashed"}
+                
+    return status_map
+
+@app.get("/api/mcp/{port}/logs")
+async def get_mcp_logs(port: int):
+    log_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_logs", f"{port}.log")
+    if not os.path.exists(log_path):
+        return {"logs": "No logs available yet."}
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            return {"logs": "".join(lines[-500:])}
+    except Exception as e:
+        return {"logs": f"Error reading logs: {e}"}
+
+@app.post("/api/mcp/{port}/restart")
+async def restart_mcp(port: int):
+    with _mcp_lock:
+        proc = mcp_processes.get(port)
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        with _mcp_lock:
+            if mcp_processes.get(port) is proc:
+                del mcp_processes[port]
+    
+    config_path = os.path.join(get_app_data_dir(), "LLaMA Pro", "mcp_configs.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            mcp_configs = json.load(f)
+    except Exception as e:
+        return JSONResponse({"error": f"Could not load MCP configs: {e}"}, status_code=500)
+
+    cfg = next((c for c in mcp_configs if c.get("port") == port), None)
+    if not cfg:
+        return JSONResponse({"error": f"No MCP config found for port {port}"}, status_code=404)
+
+    t = threading.Thread(target=monitor_and_restart, args=(cfg,), daemon=True)
+    t.start()
+    return {"status": "restarted", "port": port}
 @app.post("/api/news/refresh")
 async def refresh_news():
     return JSONResponse(content=news_manager.force_refresh())
@@ -674,15 +811,7 @@ async def set_daemon_loop(request: Request):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "app://.",           # Electron production
-        "app://-",
-        "http://localhost",
-        "http://localhost:*",
-        "http://127.0.0.1",
-        "http://127.0.0.1:*",
-    ],
-    allow_origin_regex=r"app://.*",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1269,6 +1398,17 @@ async def get_models():
         ]
     }
     
+    # Add Swarm Configs (Teams/Companies) as models
+    for config in config_state.get("configs", []):
+        models["data"].append({
+            "id": config.get("id", ""),
+            "name": config.get("name", ""),
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": "organization-owner",
+            "status": {"value": "loaded"}
+        })
+    
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"http://127.0.0.1:{LLAMA_PORT}/v1/models", timeout=2.0)
@@ -1497,11 +1637,35 @@ async def chat_completions(request: Request):
                 
                 return JSONResponse(content={"error": "All API keys for this provider failed or ran out of credits."}, status_code=500)
     
-    if model != "swarm-ensemble":
+    swarm_model_ids = [c.get("id") for c in config_state.get("configs", [])]
+    
+    if model in swarm_model_ids:
+        # Dynamically switch the active swarm if a specific one was requested
+        config_state["active_config_id"] = model
+        active_config = next((c for c in config_state["configs"] if c.get("id") == model), None)
+        if active_config:
+            config_state["nodes"] = active_config.get("nodes", [])
+            save_swarm_configs()
+            init_llms()
+            logger.info(f"Switched active swarm to {model} based on API request")
+
+    if model != "swarm-ensemble" and model not in swarm_model_ids:
         async def stream_proxy():
             try:
                 async with httpx.AsyncClient() as client:
                     async with client.stream("POST", f"http://127.0.0.1:{LLAMA_PORT}/v1/chat/completions", json=body, timeout=60.0) as resp:
+                        if resp.status_code != 200:
+                            err_text = await resp.aread()
+                            # Parse JSON if possible to extract message, otherwise use raw text
+                            try:
+                                err_json = json.loads(err_text)
+                                msg = err_json.get("error", {}).get("message", err_text.decode("utf-8")) if isinstance(err_json.get("error"), dict) else err_json.get("error", err_text.decode("utf-8"))
+                            except:
+                                msg = err_text.decode("utf-8") or f"HTTP {resp.status_code}"
+                            # Escape JSON characters for the message string
+                            msg = json.dumps(msg)
+                            yield f'data: {{"error": {{"message": {msg}, "type": "server_error"}}}}\n\ndata: [DONE]\n\n'.encode("utf-8")
+                            return
                         async for chunk in resp.aiter_bytes():
                             yield chunk
             except (httpx.ConnectError, httpx.ConnectTimeout):
@@ -1671,44 +1835,78 @@ async def start_tunnel():
 class TTSRequest(BaseModel):
     text: str
     voice: str
+    speed: float = 1.0
 
-tts_models_cache = {}
+kokoro_instance = None
+tts_cache: collections.OrderedDict[str, bytes] = collections.OrderedDict()
+TTS_CACHE_MAX = 200
+_tts_init_lock = threading.Lock()
+
+def _get_tts_model_dir() -> str:
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, "tts_models")
+    return os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models")
+
+def _preload_tts():
+    global kokoro_instance
+    try:
+        from kokoro_onnx import Kokoro
+        model_dir = _get_tts_model_dir()
+        model_path = os.path.join(model_dir, "kokoro-v1.0.onnx")
+        voices_path = os.path.join(model_dir, "voices-v1.0.bin")
+        kokoro_instance = Kokoro(model_path, voices_path)
+        logger.info("Kokoro TTS model preloaded")
+    except Exception as e:
+        logger.warning(f"Kokoro TTS preload failed (will retry on first request): {e}")
 
 @app.post("/v1/tts")
 async def text_to_speech(req: TTSRequest):
     try:
-        from piper import PiperVoice
-        import wave
+        from kokoro_onnx import Kokoro
+        import soundfile as sf
         import io
-        
-        model_name = req.voice
-        if not model_name.endswith(".onnx"):
-            model_name += ".onnx"
-            
-        if getattr(sys, 'frozen', False):
-            model_dir = os.path.join(sys._MEIPASS, "tts_models")
-        else:
-            model_dir = os.path.join(BASE_DIR, "tools", "orchestrator", "tts_models")
-            
-        model_path = os.path.join(model_dir, model_name)
-        if not os.path.exists(model_path):
-            model_path = os.path.join(model_dir, "en_GB-alan-medium.onnx")
-            
-        if model_path not in tts_models_cache:
-            tts_models_cache[model_path] = PiperVoice.load(model_path, model_path + ".json")
-            
-        voice = tts_models_cache[model_path]
-        
+        import hashlib
+
+        global kokoro_instance
+
+        if kokoro_instance is None:
+            with _tts_init_lock:
+                if kokoro_instance is None:
+                    model_dir = _get_tts_model_dir()
+                    model_path = os.path.join(model_dir, "kokoro-v1.0.onnx")
+                    voices_path = os.path.join(model_dir, "voices-v1.0.bin")
+                    kokoro_instance = await asyncio.to_thread(Kokoro, model_path, voices_path)
+
+        voice_id = req.voice or "af_sarah"
+        spd = max(0.5, min(2.0, req.speed))
+
+        cache_key = hashlib.md5(f"{req.text}|{voice_id}|{spd}".encode()).hexdigest()
+        if cache_key in tts_cache:
+            tts_cache.move_to_end(cache_key)
+            return Response(content=tts_cache[cache_key], media_type="audio/wav")
+
+        samples, sample_rate = await asyncio.to_thread(
+            kokoro_instance.create, req.text, voice=voice_id, speed=spd, lang="en-us"
+        )
+
         wav_io = io.BytesIO()
-        with wave.open(wav_io, 'wb') as wav_file:
-            voice.synthesize_wav(req.text, wav_file)
-            
-        return Response(content=wav_io.getvalue(), media_type="audio/wav")
+        sf.write(wav_io, samples, sample_rate, format="WAV")
+        wav_bytes = wav_io.getvalue()
+
+        tts_cache[cache_key] = wav_bytes
+        if len(tts_cache) > TTS_CACHE_MAX:
+            tts_cache.popitem(last=False)
+
+        return Response(content=wav_bytes, media_type="audio/wav")
     except Exception as e:
         logger.error(f"TTS Error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 whisper_model_cache = {}
+
+def _transcribe_sync(model, audio, **kwargs):
+    segments, info = model.transcribe(audio, **kwargs)
+    return "".join([s.text for s in segments]).strip()
 
 @app.post("/v1/audio/transcriptions")
 async def transcribe_audio(
@@ -1721,20 +1919,19 @@ async def transcribe_audio(
         import io
         
         model_size = model.lower()
-        if model_size not in ["tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large"]:
+        if model_size not in ["tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large", "deepdml/faster-whisper-large-v3-turbo-ct2", "large-v3-turbo"]:
             model_size = "base"
             
         if model_size not in whisper_model_cache:
             logger.info(f"Loading faster-whisper model: {model_size}")
-            whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="float32")
+            whisper_model_cache[model_size] = await asyncio.to_thread(WhisperModel, model_size, device="cpu", compute_type="int8")
             
         whisper_model = whisper_model_cache[model_size]
         
         file_bytes = await file.read()
         audio_file = io.BytesIO(file_bytes)
         
-        segments, info = whisper_model.transcribe(audio_file, beam_size=5)
-        text = "".join([segment.text for segment in segments])
+        text = await asyncio.to_thread(_transcribe_sync, whisper_model, audio_file, beam_size=1, vad_filter=True)
         
         return {"text": text.strip()}
     except Exception as e:
@@ -1745,42 +1942,39 @@ async def transcribe_audio(
 async def audio_stream(websocket: WebSocket):
     await websocket.accept()
     import io
-    audio_buffer = io.BytesIO()
+
     try:
         while True:
-            data = await websocket.receive()
-            if "bytes" in data:
-                audio_buffer.write(data["bytes"])
-            elif "text" in data:
-                if data["text"] == "EOF":
-                    break
+            audio_buffer = io.BytesIO()
+            try:
+                while True:
+                    data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+                    if "bytes" in data:
+                        audio_buffer.write(data["bytes"])
+                    elif "text" in data:
+                        if data["text"] == "EOF":
+                            break
+            except asyncio.TimeoutError:
+                break
+
+            audio_buffer.seek(0)
+            if audio_buffer.getbuffer().nbytes > 0:
+                from faster_whisper import WhisperModel
+                model_size = "deepdml/faster-whisper-large-v3-turbo-ct2"
+                if model_size not in whisper_model_cache:
+                    logger.info(f"Loading faster-whisper model: {model_size}")
+                    whisper_model_cache[model_size] = await asyncio.to_thread(WhisperModel, model_size, device="cpu", compute_type="int8")
+
+                whisper_model = whisper_model_cache[model_size]
+                text = await asyncio.to_thread(_transcribe_sync, whisper_model, audio_buffer, beam_size=1, vad_filter=True)
+            else:
+                text = ""
+
+            await websocket.send_json({"text": text})
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.error(f"WebSocket STT Error: {e}")
-    finally:
-        try:
-            audio_buffer.seek(0)
-            if audio_buffer.getbuffer().nbytes > 0:
-                from faster_whisper import WhisperModel
-                model_size = "base"
-                if model_size not in whisper_model_cache:
-                    logger.info(f"Loading faster-whisper model: {model_size}")
-                    whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="float32")
-                
-                whisper_model = whisper_model_cache[model_size]
-                segments, info = whisper_model.transcribe(audio_buffer, beam_size=5)
-                text = "".join([segment.text for segment in segments]).strip()
-            else:
-                text = ""
-                
-            await websocket.send_json({"text": text})
-            try:
-                await websocket.close()
-            except Exception:
-                pass
-        except Exception as e:
-            logger.error(f"Error finalizing WebSocket STT: {e}")
 
 class ActionPayload(BaseModel):
     action: str

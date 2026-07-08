@@ -7,17 +7,46 @@ import type { McpServerOverride } from '$lib/types/database';
 class LlamaUiDatabase extends Dexie {
 	[IDXDB_TABLES.conversations]!: EntityTable<DatabaseConversation, string>;
 	[IDXDB_TABLES.messages]!: EntityTable<DatabaseMessage, string>;
+	[IDXDB_TABLES.companies]!: EntityTable<DatabaseCompany, string>;
 
 	constructor() {
 		super(STORAGE_APP_NAME);
 
-		this.version(1).stores(IDXDB_STORES);
+		this.version(2).stores(IDXDB_STORES); // Incremented version to 2 for companies table
 	}
 }
 
 const db = new LlamaUiDatabase();
 
 export class DatabaseService {
+	/**
+	 *
+	 *
+	 * Companies
+	 *
+	 *
+	 */
+
+	static async createCompany(company: DatabaseCompany): Promise<void> {
+		await db[IDXDB_TABLES.companies].add(company);
+	}
+
+	static async updateCompany(id: string, updates: Partial<DatabaseCompany>): Promise<void> {
+		await db[IDXDB_TABLES.companies].update(id, updates);
+	}
+
+	static async deleteCompany(id: string): Promise<void> {
+		await db[IDXDB_TABLES.companies].delete(id);
+	}
+
+	static async getCompany(id: string): Promise<DatabaseCompany | undefined> {
+		return await db[IDXDB_TABLES.companies].get(id);
+	}
+
+	static async getAllCompanies(): Promise<DatabaseCompany[]> {
+		return await db[IDXDB_TABLES.companies].toArray();
+	}
+
 	/**
 	 *
 	 *

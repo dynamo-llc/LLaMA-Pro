@@ -13,7 +13,10 @@ export const SETTINGS_SECTION_SLUGS = {
 	IMPORT_EXPORT: 'import-export',
 	ECHO: 'echo',
 	MESH: 'mesh',
-	TUNNEL: 'tunnel'
+	TUNNEL: 'tunnel',
+	MODELS: 'models',
+	TELEMETRY: 'telemetry',
+	TERMINAL: 'terminal'
 } as const;
 
 export const ROUTES = {
@@ -24,13 +27,13 @@ export const ROUTES = {
 	/** Chat base — for dynamic chat URLs use RouterService. */
 	CHAT: '#/chat',
 	/** MCP servers. */
-	MCP_SERVERS: '#/mcp-servers',
+	MCP_SERVERS: '#/settings/mcp',
 	/** Models management. */
-	MODELS: '#/models',
+	MODELS: '#/settings/models',
 	/** Telemetry. */
-	TELEMETRY: '#/telemetry',
+	TELEMETRY: '#/settings/telemetry',
 	/** Terminal. */
-	TERMINAL: '#/terminal',
+	TERMINAL: '#/settings/terminal',
 	/** Settings base — for dynamic settings URLs use RouterService. */
 	SETTINGS: '#/settings',
 	/** Search — mobile-only full-page conversation search. */

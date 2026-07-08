@@ -38,7 +38,7 @@ export default defineConfig({
 
 	build: {
 		assetsInlineLimit: 32000,
-		chunkSizeWarningLimit: 3072,
+		chunkSizeWarningLimit: 10000,
 		minify: true
 	},
 

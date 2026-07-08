@@ -1,12 +1,16 @@
-# -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
+espeakng_datas = collect_data_files('espeakng_loader')
+espeakng_bins = collect_dynamic_libs('espeakng_loader')
+kokoro_datas = collect_data_files('kokoro_onnx')
+phonemizer_datas = collect_data_files('phonemizer')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[('tts_models/*', 'tts_models')],
-    hiddenimports=['multipart', 'multipart.multipart'],
+    binaries=espeakng_bins,
+    datas=[('tts_models/*', 'tts_models')] + espeakng_datas + kokoro_datas + phonemizer_datas,
+    hiddenimports=['multipart', 'multipart.multipart', 'kokoro_onnx', 'espeakng_loader', 'phonemizer', 'soundfile', 'faster_whisper'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -14,6 +18,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

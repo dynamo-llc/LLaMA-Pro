@@ -15,6 +15,8 @@
 		serverInfo?: MCPServerInfo;
 		capabilities?: MCPCapabilitiesInfo;
 		transportType?: MCPTransportType;
+		processStatus?: 'running' | 'crashed' | 'unknown';
+		uptimeSeconds?: number | null;
 	}
 
 	let {
@@ -25,8 +27,19 @@
 		onToggle,
 		serverInfo,
 		capabilities,
-		transportType
+		transportType,
+		processStatus = 'unknown',
+		uptimeSeconds = null
 	}: Props = $props();
+
+	function formatUptime(seconds: number | null): string {
+		if (seconds === null) return '';
+		const hrs = Math.floor(seconds / 3600);
+		const mins = Math.floor((seconds % 3600) / 60);
+		if (hrs > 0) return ` (${hrs}h ${mins}m)`;
+		if (mins > 0) return ` (${mins}m)`;
+		return ` (< 1m)`;
+	}
 </script>
 
 <div class="space-y-3">
@@ -47,7 +60,7 @@
 				<div class="flex flex-wrap items-center gap-1.5">
 					{#if transportType}
 						{@const TransportIcon = MCP_TRANSPORT_ICONS[transportType]}
-						<Badge variant="outline" class="h-5 gap-1 px-1.5 text-[10px]">
+						<Badge variant="secondary" class="h-5 gap-1 px-2 text-[10px] font-medium bg-muted/50 border border-border/50 text-muted-foreground shadow-sm">
 							{#if TransportIcon}
 								<TransportIcon class="h-3 w-3" />
 							{/if}
@@ -58,6 +71,18 @@
 
 					{#if capabilities}
 						<McpCapabilitiesBadges {capabilities} />
+					{/if}
+
+					{#if processStatus === 'running'}
+						<Badge variant="secondary" class="h-5 gap-1 px-2 text-[10px] font-medium bg-green-500/10 text-green-600 border border-green-500/20 shadow-sm">
+							<div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+							Running{formatUptime(uptimeSeconds)}
+						</Badge>
+					{:else if processStatus === 'crashed'}
+						<Badge variant="secondary" class="h-5 gap-1 px-2 text-[10px] font-medium bg-destructive/10 text-destructive border border-destructive/20 shadow-sm">
+							<div class="w-1.5 h-1.5 rounded-full bg-destructive"></div>
+							Crashed
+						</Badge>
 					{/if}
 				</div>
 			{/if}

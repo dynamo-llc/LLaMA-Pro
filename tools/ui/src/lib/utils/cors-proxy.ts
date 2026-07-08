@@ -8,6 +8,7 @@ import {
 	CORS_PROXY_HEADER_PREFIX,
 	CORS_PROXY_URL_PARAM
 } from '$lib/constants';
+import { getBaseUrl } from './get-base-url';
 
 /**
  * Build a proxied URL that routes through llama-server's CORS proxy.
@@ -15,12 +16,12 @@ import {
  * @returns URL pointing to the CORS proxy with target encoded
  */
 export function buildProxiedUrl(targetUrl: string): URL {
-	const proxyPath = `${base}${CORS_PROXY_ENDPOINT}`;
-	const proxyUrl = new URL(proxyPath, window.location.origin);
+	const proxyPath = `${getBaseUrl('llama')}${CORS_PROXY_ENDPOINT}`;
 
-	proxyUrl.searchParams.set(CORS_PROXY_URL_PARAM, targetUrl);
+	const url = new URL(proxyPath, typeof window !== 'undefined' ? window.location.href : 'http://localhost');
+	url.searchParams.set(CORS_PROXY_URL_PARAM, targetUrl);
 
-	return proxyUrl;
+	return url;
 }
 
 /**

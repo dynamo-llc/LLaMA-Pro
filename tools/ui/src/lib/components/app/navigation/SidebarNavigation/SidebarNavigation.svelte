@@ -28,6 +28,7 @@
 	import { Server, Copy } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { getDaemonUrl } from '$lib/utils/get-base-url';
+	import { sessionTelemetryStore } from '$lib/stores/session-telemetry.svelte';
 
 	let isServerAlive = $state(false);
 	let healthCheckFailed = $state(false);
@@ -408,19 +409,6 @@
 					}}
 				/>
 
-				{#if (isExpandedMode || isOnMobile) && (!page.url.hash || page.url.hash === '#/' || page.url.hash.startsWith('#/chat') || page.url.hash.includes('new_chat='))}
-					<SidebarNavigationConversationList
-						class="px-2"
-						{filteredConversations}
-						{currentChatId}
-						{isSearchModeActive}
-						{searchQuery}
-						onSelect={selectConversation}
-						onEdit={handleEditConversation}
-						onDelete={handleDeleteConversation}
-						onStop={handleStopGeneration}
-					/>
-				{/if}
 			</div>
 		</div>
 
@@ -624,6 +612,25 @@
 			{@render statusCard()}
 		</div>
 	{/if}
+
+	<!-- Speed Monitor -->
+	<div class="relative h-9 w-9 rounded-full bg-card border border-border/60 flex flex-col items-center justify-center pointer-events-none transition-all duration-300 {sessionTelemetryStore.latestSpeed > 0 ? 'shadow-[0_0_12px_rgba(168,85,247,0.6)]' : 'shadow-md'}"
+	>
+		<span class="text-[7px] text-muted-foreground uppercase font-semibold leading-none mb-0.5 mt-0.5">Spd</span>
+		<span class="text-[10px] font-bold leading-none {sessionTelemetryStore.latestSpeed > 0 ? 'text-purple-500' : 'text-foreground'}">
+			{sessionTelemetryStore.latestSpeed > 0 ? sessionTelemetryStore.latestSpeed.toFixed(0) : '-'}
+		</span>
+	</div>
+	
+	<!-- Avg Monitor -->
+	<div class="relative h-9 w-9 rounded-full bg-card border border-border/60 flex flex-col items-center justify-center pointer-events-none transition-all duration-300 {sessionTelemetryStore.getAverageSpeed() > 0 ? 'shadow-[0_0_12px_rgba(34,197,94,0.6)]' : 'shadow-md'}"
+	>
+		<span class="text-[7px] text-muted-foreground uppercase font-semibold leading-none mb-0.5 mt-0.5">Avg</span>
+		<span class="text-[10px] font-bold leading-none {sessionTelemetryStore.getAverageSpeed() > 0 ? 'text-green-500' : 'text-foreground'}">
+			{sessionTelemetryStore.getAverageSpeed() > 0 ? sessionTelemetryStore.getAverageSpeed().toFixed(0) : '-'}
+		</span>
+	</div>
+
 	<button
 		class="server-monitor-trigger relative h-9 w-9 rounded-full bg-card border border-border/60 shadow-md flex items-center justify-center hover:bg-muted transition-colors"
 		onclick={toggleMonitor}

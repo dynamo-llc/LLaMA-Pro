@@ -85,6 +85,8 @@ class MCPStore {
 	private _toolCount = $state(0);
 	private _connectedServers = $state<string[]>([]);
 	private _healthChecks = $state<Record<string, HealthCheckState>>({});
+	private _processStatus = $state<Record<string, 'running' | 'crashed'>>({});
+	private _processUptime = $state<Record<string, number>>({});
 
 	private connections = new Map<string, MCPConnection>();
 	private toolsIndex = new Map<string, string>();
@@ -93,6 +95,7 @@ class MCPStore {
 	private configSignature: string | null = null;
 	private initPromise: Promise<boolean> | null = null;
 	private activeFlowCount = 0;
+	private statusPollInterval: ReturnType<typeof setInterval> | null = null;
 
 	// M2: cache isEnabled to avoid rebuilding MCP config on every reactive access
 	private readonly _isEnabled = $derived(
@@ -334,7 +337,15 @@ class MCPStore {
 	}
 
 	getHealthCheckState(serverId: string): HealthCheckState {
-		return this._healthChecks[serverId] ?? { status: HealthCheckStatus.IDLE };
+		return this._healthChecks[serverId] ?? { status: HealthCheckStatus.UNKNOWN };
+	}
+
+	getProcessStatus(id: string): 'running' | 'crashed' | 'unknown' {
+		return this._processStatus[id] || 'unknown';
+	}
+
+	getProcessUptime(id: string): number | null {
+		return this._processUptime[id] || null;
 	}
 
 	hasHealthCheck(serverId: string): boolean {
@@ -565,8 +576,27 @@ class MCPStore {
 		);
 	}
 
-	removeServer(id: string): void {
+	async removeServer(id: string): Promise<void> {
 		const servers = this.getServers();
+		const server = servers.find((s) => s.id === id);
+		
+		if (server) {
+			try {
+				const url = new URL(server.url);
+				if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
+					const port = url.port;
+					if (port) {
+						import('$lib/utils').then(async ({ getBaseUrl }) => {
+							const orchestratorUrl = getBaseUrl('orchestrator');
+							await fetch(`${orchestratorUrl}/api/mcp/${port}`, { method: 'DELETE' });
+						}).catch(console.error);
+					}
+				}
+			} catch (e) {
+				console.error("Failed to delete remote MCP process:", e);
+			}
+		}
+
 		settingsStore.updateConfig(
 			SETTINGS_KEYS.MCP_SERVERS,
 			JSON.stringify(servers.filter((s) => s.id !== id))
@@ -615,6 +645,8 @@ class MCPStore {
 
 	private async initialize(signature: string, mcpConfig: MCPClientConfig): Promise<boolean> {
 		this.updateState({ isInitializing: true, error: null });
+
+		this.startStatusPolling();
 
 		const serverEntries = Object.entries(mcpConfig.servers);
 
@@ -780,7 +812,49 @@ class MCPStore {
 		return this.activeFlowCount;
 	}
 
+	private async startStatusPolling() {
+		if (this.statusPollInterval || !browser) return;
+		this.statusPollInterval = setInterval(async () => {
+			try {
+				const { getBaseUrl } = await import('$lib/utils');
+				const orchestratorUrl = getBaseUrl('orchestrator');
+				const res = await fetch(`${orchestratorUrl}/api/mcp/status`);
+				if (!res.ok) return;
+				const statusMap: Record<string, { status: string, uptime_seconds?: number }> = await res.json();
+				
+				const newProcessStatus: Record<string, 'running' | 'crashed'> = {};
+				const newProcessUptime: Record<string, number> = {};
+				for (const server of this.getServers()) {
+					if (server.url) {
+						try {
+							const u = new URL(server.url);
+							if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+								if (u.port && statusMap[u.port]) {
+									newProcessStatus[server.id] = statusMap[u.port].status as 'running' | 'crashed';
+									if (statusMap[u.port].uptime_seconds) {
+										newProcessUptime[server.id] = statusMap[u.port].uptime_seconds;
+									}
+								}
+							}
+						} catch(e) {}
+					}
+				}
+				this._processStatus = newProcessStatus;
+				this._processUptime = newProcessUptime;
+			} catch (e) {
+				// Ignore fetch errors during polling
+			}
+		}, 3000);
+	}
+
+	/**
+	 * Shutdown all connections
+	 */
 	async shutdown(): Promise<void> {
+		if (this.statusPollInterval) {
+			clearInterval(this.statusPollInterval);
+			this.statusPollInterval = null;
+		}
 		if (this.initPromise) {
 			await this.initPromise.catch(() => {});
 			this.initPromise = null;
@@ -1143,6 +1217,31 @@ class MCPStore {
 		}
 
 		return results;
+	}
+
+	async getServerPrompts(serverName: string): Promise<MCPPromptInfo[]> {
+		const connection = this.connections.get(serverName);
+		if (!connection || !connection.serverCapabilities?.prompts) {
+			return [];
+		}
+
+		try {
+			const prompts = await MCPService.listPrompts(connection);
+			return prompts.map(prompt => ({
+				name: prompt.name,
+				description: prompt.description,
+				title: prompt.title,
+				serverName,
+				arguments: prompt.arguments?.map((arg) => ({
+					name: arg.name,
+					description: arg.description,
+					required: arg.required
+				}))
+			}));
+		} catch (error) {
+			console.error(`Failed to list prompts for ${serverName}:`, error);
+			return [];
+		}
 	}
 
 	async getPrompt(

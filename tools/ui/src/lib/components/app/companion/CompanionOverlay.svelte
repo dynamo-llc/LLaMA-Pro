@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { Settings, Mic, SendHorizontal, X, BrainCircuit, AlertTriangle, Shield, Zap, Eye, Radio, Terminal, ChevronRight, RotateCcw } from '@lucide/svelte';
+    import { MicVAD } from '@ricky0123/vad-web';
+    import { Settings, Mic, SendHorizontal, X, BrainCircuit, AlertTriangle, Shield, Zap, Eye, Radio, Terminal, ChevronRight, RotateCcw, Plus } from '@lucide/svelte';
     import { Button } from '$lib/components/ui/button';
     import { Input } from '$lib/components/ui/input';
     import { Label } from '$lib/components/ui/label';
@@ -9,37 +10,102 @@
     import * as Tooltip from '$lib/components/ui/tooltip';
     import { fade, scale, fly } from 'svelte/transition';
     import { companionStore } from '$lib/services/companion.svelte';
+    import { companiesStore } from '$lib/stores/companies.svelte';
     import { modelsStore } from '$lib/stores/models.svelte';
     import { toast } from 'svelte-sonner';
     import { getBaseUrl } from '$lib/utils/get-base-url';
     import MarkdownContent from '$lib/components/app/content/MarkdownContent/MarkdownContent.svelte';
     import { personas } from '$lib/services/personas';
+    import { jarvisBackend } from '$lib/services/jarvis-backend.service';
+    import PersonaStudio from './PersonaStudio.svelte';
+    import { SFX } from '$lib/utils/sound-effects';
 
     let isSettingsOpen = $state(false);
+    let isPersonaStudioOpen = $state(false);
+    let personaStudioMode = $state<'edit' | 'create'>('edit');
     let inputText = $state('');
     let isListening = $state(false);
     let isPreparingMic = $state(false);
     let isTranscribing = $state(false);
     
-    let mediaRecorder: MediaRecorder | null = null;
+
+    let vadInstance: MicVAD | null = null;
+    let sttWs: WebSocket | null = null;
+    let sttWsEndpoint = '';
 
     // Premium glowing orb states
     let orbScale = $state(1);
     let orbHue = $state(200); // Blue by default
-    let pulseInterval: ReturnType<typeof setInterval> | undefined = undefined;
 
     // Typewriter effect state
     let typedText = $state('');
     let typewriterInterval: ReturnType<typeof setInterval> | undefined = undefined;
 
+    // PIP Mode State
+    let isPipMode = $state(false);
+    let pipX = $state(window.innerWidth - 320 - 40);
+    let pipY = $state(window.innerHeight - 240 - 40);
+    let isDraggingPip = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+
+    function handlePipDragStart(e: MouseEvent | TouchEvent) {
+        if (!isPipMode) return;
+        isDraggingPip = true;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        dragStartX = clientX - pipX;
+        dragStartY = clientY - pipY;
+        
+        window.addEventListener('mousemove', handlePipDragMove);
+        window.addEventListener('mouseup', handlePipDragEnd);
+        window.addEventListener('touchmove', handlePipDragMove, { passive: false });
+        window.addEventListener('touchend', handlePipDragEnd);
+    }
+
+    function handlePipDragMove(e: MouseEvent | TouchEvent) {
+        if (!isDraggingPip) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
+        pipX = clientX - dragStartX;
+        pipY = clientY - dragStartY;
+    }
+
+    function handlePipDragEnd() {
+        isDraggingPip = false;
+        window.removeEventListener('mousemove', handlePipDragMove);
+        window.removeEventListener('mouseup', handlePipDragEnd);
+        window.removeEventListener('touchmove', handlePipDragMove);
+        window.removeEventListener('touchend', handlePipDragEnd);
+    }
+
+    function togglePipMode() {
+        isPipMode = !isPipMode;
+        SFX.playWhoosh();
+    }
+
+    function handleGlobalKeydown(e: KeyboardEvent) {
+        if (e.ctrlKey && e.shiftKey) {
+            if (e.key.toLowerCase() === 'o') {
+                e.preventDefault();
+                if (companionStore.isOpen) companionStore.close();
+                else companionStore.open();
+                SFX.playHover();
+            } else if (e.key.toLowerCase() === 'p') {
+                e.preventDefault();
+                if (companionStore.isOpen) {
+                    togglePipMode();
+                }
+            }
+        }
+    }
+
     let currentTime = $state('00:00:00 UTC');
     let currentDate = $state('JAN 01, 2099');
-    let timeInterval: ReturnType<typeof setInterval>;
     let cpuUsage = $state(18);
     let memUsage = $state(100);
     let netUsage = $state(42);
     let ioUsage = $state(27);
-    let statsInterval: ReturnType<typeof setInterval>;
     
     let freqData = new Uint8Array(40);
     let eqHeights = $state<number[]>(Array(40).fill(20));
@@ -48,9 +114,6 @@
     let currentVolume = $state(0);
     let oscilloscopeCanvas = $state<HTMLCanvasElement>();
     let matrixCanvas = $state<HTMLCanvasElement>();
-    let matrixInterval: ReturnType<typeof setInterval>;
-    let faceTrackerInterval: ReturnType<typeof setInterval>;
-    let focusInterval: ReturnType<typeof setInterval>;
     
     let faceTrackerX = $state(50);
     let faceTrackerY = $state(45);
@@ -60,9 +123,42 @@
     
     let vadSilenceTimer: ReturnType<typeof setTimeout> | null = null;
     let isUserSpeaking = false;
-    let speechDurationFrames = 0;
 
     let isGlitching = $state(false);
+
+    // Action to control carousel video playback
+    function carouselVideo(node: HTMLVideoElement, isActive: boolean) {
+        let currentActive = isActive;
+        
+        $effect(() => {
+            currentActive = isActive;
+            if (isActive) {
+                node.play().catch(()=>{});
+            } else {
+                node.pause();
+                node.currentTime = 0; // reset to first frame
+            }
+        });
+        
+        const play = () => { if (!currentActive) node.play().catch(()=>{}); };
+        const pause = () => { if (!currentActive) { node.pause(); node.currentTime = 0; } };
+        
+        // Attach to the parent button to capture hover correctly
+        const parent = node.parentElement;
+        if (parent) {
+            parent.addEventListener('mouseenter', play);
+            parent.addEventListener('mouseleave', pause);
+        }
+        
+        return {
+            destroy() {
+                if (parent) {
+                    parent.removeEventListener('mouseenter', play);
+                    parent.removeEventListener('mouseleave', pause);
+                }
+            }
+        };
+    }
 
     // ---- Persona signature colors [h, s, l] ----
     const personaColors: Record<string, [number, number, number]> = {
@@ -125,7 +221,33 @@
         return { x: +(50 + r * Math.cos(a)).toFixed(1), y: +(50 - r * Math.sin(a)).toFixed(1) };
     }
 
-    let activeColor = $derived(personaColors[companionStore.activePersonaId] ?? [200, 80, 50]);
+    function hexToHsl(hex: string): [number, number, number] {
+        hex = hex.replace(/^#/, '');
+        if (hex.length === 3) hex = hex.split('').map(x => x + x).join('');
+        const r = parseInt(hex.substring(0, 2), 16) / 255;
+        const g = parseInt(hex.substring(2, 4), 16) / 255;
+        const b = parseInt(hex.substring(4, 6), 16) / 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h = 0, s = 0, l = (max + min) / 2;
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
+    }
+
+    let activeColor = $derived.by(() => {
+        const id = companionStore.activePersonaId;
+        const p = companionStore.personaList.find(x => x.id === id);
+        if (p?.glowColor) return hexToHsl(p.glowColor);
+        return personaColors[id] ?? [200, 80, 50];
+    });
 
     // Token budget as % of 32k context
     let tokenBudget = $derived(
@@ -222,9 +344,67 @@
         } catch (e) {}
     }
 
+    // ---- Voice backend (jarvis) global settings ----
+    interface BackendSettingsDraft {
+        min_silence_ms: number;
+        min_silence_complete_ms: number;
+        speculative_silence_ms: number;
+        interrupt_threshold: number;
+        follow_up_window_s: number;
+        wake_enabled: boolean;
+        tts_parallel: number;
+    }
+    let backendSettings = $state<BackendSettingsDraft | null>(null);
+    let backendSettingsSaving = $state(false);
+
+    async function loadBackendSettings() {
+        try {
+            const s = (await jarvisBackend.getSettings()) as any;
+            backendSettings = {
+                min_silence_ms: s.vad?.min_silence_ms ?? 550,
+                min_silence_complete_ms: s.vad?.min_silence_complete_ms ?? 300,
+                speculative_silence_ms: s.vad?.speculative_silence_ms ?? 220,
+                interrupt_threshold: s.vad?.interrupt_threshold ?? 0.75,
+                follow_up_window_s: s.wake_word?.follow_up_window_s ?? 8,
+                wake_enabled: s.wake_word?.enabled ?? true,
+                tts_parallel: s.tts?.parallel ?? 2
+            };
+        } catch {
+            backendSettings = null; // backend offline: hide the section
+        }
+    }
+
+    async function saveBackendSettings() {
+        if (!backendSettings) return;
+        backendSettingsSaving = true;
+        try {
+            const result = await jarvisBackend.updateSettings({
+                vad: {
+                    min_silence_ms: Number(backendSettings.min_silence_ms),
+                    min_silence_complete_ms: Number(backendSettings.min_silence_complete_ms),
+                    speculative_silence_ms: Number(backendSettings.speculative_silence_ms),
+                    interrupt_threshold: Number(backendSettings.interrupt_threshold)
+                },
+                wake_word: {
+                    enabled: backendSettings.wake_enabled,
+                    follow_up_window_s: Number(backendSettings.follow_up_window_s)
+                },
+                tts: { parallel: Number(backendSettings.tts_parallel) }
+            });
+            if (result.restart_required) {
+                companionStore.showToast('BACKEND CONFIG SAVED // RESTART TO APPLY', 'success');
+            }
+        } catch (e: any) {
+            companionStore.showToast(`BACKEND SAVE FAILED: ${e?.message ?? e}`, 'warning');
+        } finally {
+            backendSettingsSaving = false;
+        }
+    }
+
     $effect(() => {
         if (isSettingsOpen) {
             fetchUpgradeLogs();
+            void loadBackendSettings();
         }
     });
 
@@ -274,14 +454,11 @@
         }
     });
 
-    let isIotActive = $state(false);
-    let isIngesting = $state(false);
-    let orbBorderRadius = $state('50%');
+
     
     let isMicOverride = $state(false);
     let isCameraOverride = $state(false);
     let systemStatus = $state({ mcpServers: [], projects: [], ghostProtocol: false, daemon: false });
-    let statusInterval: ReturnType<typeof setInterval>;
 
     $effect(() => {
         const _ = companionStore.messages;
@@ -395,33 +572,7 @@
                 }
             }
 
-            if (isListening) {
-                if (currentVolume > companionStore.vadVolumeThreshold) { // speech threshold
-                    speechDurationFrames++;
-                    if (speechDurationFrames >= 3) { // Speech confirmed (150ms of continuous vocal energy)
-                        if (!isUserSpeaking) {
-                            isUserSpeaking = true;
-                            companionStore.stopSpeaking();
-                        }
-                        if (vadSilenceTimer) {
-                            clearTimeout(vadSilenceTimer);
-                            vadSilenceTimer = null;
-                        }
-                    }
-                } else {
-                    speechDurationFrames = 0;
-                    if (isUserSpeaking) {
-                        if (!vadSilenceTimer) {
-                            vadSilenceTimer = setTimeout(() => {
-                                isUserSpeaking = false;
-                                playChime('stop');
-                                speakAcknowledgePlaceholder();
-                                stopListening();
-                            }, companionStore.vadSilenceTimeout); // silence duration to trigger turn-end
-                        }
-                    }
-                }
-            }
+
         } else {
             currentVolume = 0;
             for(let i=0; i<40; i++) {
@@ -562,6 +713,42 @@
         }
     }
 
+    function float32ToWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+        const numChannels = 1;
+        const bitsPerSample = 16;
+        const bytesPerSample = bitsPerSample / 8;
+        const dataLength = samples.length * bytesPerSample;
+        const buffer = new ArrayBuffer(44 + dataLength);
+        const view = new DataView(buffer);
+
+        const writeString = (offset: number, str: string) => {
+            for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+        };
+
+        writeString(0, 'RIFF');
+        view.setUint32(4, 36 + dataLength, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+        view.setUint16(32, numChannels * bytesPerSample, true);
+        view.setUint16(34, bitsPerSample, true);
+        writeString(36, 'data');
+        view.setUint32(40, dataLength, true);
+
+        let offset = 44;
+        for (let i = 0; i < samples.length; i++) {
+            const s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            offset += 2;
+        }
+
+        return buffer;
+    }
+
     async function toggleListening() {
         companionStore.initAudio();
         companionStore.stopSpeaking();
@@ -574,105 +761,136 @@
 
         try {
             isPreparingMic = true;
-            
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+
+            let micStream: MediaStream;
+            try {
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                micStream.getTracks().forEach(t => t.stop());
+            } catch (e: any) {
+                if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+                    toast.error("Microphone blocked. Allow microphone in your browser's site settings.");
+                } else if (e.name === 'NotFoundError') {
+                    toast.error("No microphone found. Please connect a microphone.");
+                } else {
+                    toast.error("Microphone error: " + (e.message || e.name));
+                }
+                isMicOverride = false;
+                isPreparingMic = false;
+                return;
+            }
+
+            const isElectron = window.location.protocol === 'app:';
+            const assetBase = isElectron
+                ? window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/')
+                : '/';
+            vadInstance = await MicVAD.new({
+                baseAssetPath: assetBase,
+                onnxWASMBasePath: assetBase + 'ort-1.14/',
+                ortConfig: (ort) => {
+                    ort.env.wasm.wasmPaths = assetBase + 'ort-1.14/';
+                    ort.env.wasm.numThreads = 1;
+                },
+                model: "v5",
+                positiveSpeechThreshold: 0.8,
+                negativeSpeechThreshold: 0.15,
+                minSpeechMs: 250,
+                redemptionMs: 400,
+                onSpeechStart: () => {
+                    isUserSpeaking = true;
+                    companionStore.stopGeneration();
+                },
+                onSpeechEnd: async (audio: Float32Array) => {
+                    isUserSpeaking = false;
+                    playChime('stop');
+
+                    isListening = false;
+                    companionStore.isVoiceMode = false;
+                    isTranscribing = true;
+
+                    try {
+                        const wavBytes = float32ToWav(audio, 16000);
+
+                        if (!sttWsEndpoint) {
+                            const isDesktop = window.location.protocol === 'app:';
+                            const host = (isDesktop || !window.location.hostname || window.location.hostname === '') ? '127.0.0.1' : window.location.hostname;
+                            const orchestratorPort = (window as any).orchestratorPort || '8000';
+                            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                            sttWsEndpoint = `${wsProtocol}//${host}:${orchestratorPort}/v1/audio/stream`;
+                        }
+
+                        if (!sttWs || sttWs.readyState !== WebSocket.OPEN) {
+                            sttWs = new WebSocket(sttWsEndpoint);
+                            await new Promise<void>((resolve, reject) => {
+                                sttWs!.onopen = () => resolve();
+                                sttWs!.onerror = (e) => reject(e);
+                            });
+                        }
+
+                        const ws = sttWs;
+                        ws.send(wavBytes);
+                        ws.send("EOF");
+
+                        const result = await new Promise<any>((resolve, reject) => {
+                            ws.onmessage = (event) => {
+                                try { resolve(JSON.parse(event.data)); }
+                                catch (e) { reject(e); }
+                            };
+                            ws.onerror = (e) => reject(e);
+                            ws.onclose = () => {
+                                sttWs = null;
+                                resolve({ text: "" });
+                            };
+                        });
+
+                        if (result?.text?.trim() && result.text.trim().length > 3) {
+                            const transcribed = result.text.trim();
+                            if (checkVoiceCommands(transcribed)) return;
+                            inputText = transcribed;
+                            await handleSend();
+                        }
+                    } catch (e) {
+                        console.error("VAD STT Error", e);
+                        toast.error("Speech recognition failed");
+                    } finally {
+                        isTranscribing = false;
+                        if (isMicOverride && vadInstance) {
+                            vadInstance.start();
+                            isListening = true;
+                            companionStore.isVoiceMode = true;
+                        }
+                    }
                 }
             });
-            
+
             if (companionStore.audioCtx && companionStore.analyser) {
-                const source = companionStore.audioCtx.createMediaStreamSource(stream);
-                source.connect(companionStore.analyser);
+                const stream = (vadInstance as any).stream;
+                if (stream) {
+                    const source = companionStore.audioCtx.createMediaStreamSource(stream);
+                    source.connect(companionStore.analyser);
+                }
             }
-            const isDesktop = window.location.protocol === 'app:';
-            const host = (isDesktop || !window.location.hostname || window.location.hostname === '') ? '127.0.0.1' : window.location.hostname;
-            const orchestratorPort = (window as any).orchestratorPort || '8000';
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsEndpoint = `${wsProtocol}//${host}:${orchestratorPort}/v1/audio/stream`;
-            
-            const ws = new WebSocket(wsEndpoint);
-            
+
+            vadInstance.start();
             playChime('start');
-            mediaRecorder = new MediaRecorder(stream);
+            isListening = true;
+            companionStore.isVoiceMode = true;
+            isPreparingMic = false;
+            lastSpeechTime = Date.now();
 
-            mediaRecorder.ondataavailable = async (e) => {
-                if (e.data && e.data.size > 0) {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        const arrayBuffer = await e.data.arrayBuffer();
-                        ws.send(arrayBuffer);
-                    }
-                }
-            };
-            
-            mediaRecorder.onstop = async () => {
-                isListening = false;
-                companionStore.isVoiceMode = false;
-                isTranscribing = true;
-                try {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        ws.send("EOF");
-                    }
-                    
-                    const result = await new Promise<any>((resolve, reject) => {
-                        ws.onmessage = (event) => {
-                            try {
-                                resolve(JSON.parse(event.data));
-                            } catch (e) {
-                                reject(e);
-                            }
-                        };
-                        ws.onerror = (e) => reject(e);
-                        ws.onclose = () => resolve({ text: "" });
-                    });
-                    
-                    if (result && result.text && result.text.trim() && result.text.trim().length > 3) {
-                        const transcribed = result.text.trim();
-                        if (checkVoiceCommands(transcribed)) {
-                            return;
-                        }
-                        inputText = transcribed;
-                        await handleSend();
-                    }
-                } catch (e) {
-                    console.error("WebSocket STT Error", e);
-                    toast.error("Speech recognition failed");
-                } finally {
-                    isTranscribing = false;
-                    try { ws.close(); } catch(e) {}
-                }
-                stream.getTracks().forEach(t => t.stop());
-            };
-
-            ws.onopen = () => {
-                mediaRecorder?.start(250);
-                isListening = true;
-                companionStore.isVoiceMode = true;
-                isPreparingMic = false;
-                lastSpeechTime = Date.now();
-            };
-
-            ws.onerror = () => {
-                isPreparingMic = false;
-                isListening = false;
-                try { ws.close(); } catch(e) {}
-                stream.getTracks().forEach(t => t.stop());
-                toast.error("Speech recognition connection failed");
-            };
-
-        } catch (error) {
-            toast.error("Microphone access denied");
+        } catch (error: any) {
+            console.error("Voice activation failed", error);
+            toast.error("Voice activation failed: " + (error.message || "Check browser console."));
             isMicOverride = false;
             isPreparingMic = false;
         }
     }
 
     function stopListening() {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
+        if (vadInstance) {
+            vadInstance.pause();
         }
+        isListening = false;
+        companionStore.isVoiceMode = false;
     }
 
     function captureWebcamFrame(): string | null {
@@ -702,10 +920,10 @@
 
         // Auto-switch persona based on name invocation
         const lowerText = text.toLowerCase();
-        for (const p of personas) {
+        for (const p of companionStore.personaList) {
             const firstName = p.name.split(' ')[0].toLowerCase();
             if (lowerText.includes(firstName)) {
-                companionStore.activePersonaId = p.id;
+                companionStore.setActivePersona(p.id);
                 break;
             }
         }
@@ -765,126 +983,179 @@
         frame();
     }
 
+    let masterAnimFrame: number;
+    let masterAnimLastTimes = {
+        stats: 0, status: 0, face: 0, matrix: 0, focus: 0, pulse: 0
+    };
+
     onMount(() => {
-        statsInterval = setInterval(updateStats, 200);
-        // rAF loop is managed by the $effect that watches companionStore.isOpen
-        
-        statusInterval = setInterval(fetchSystemStatus, 2000);
-        fetchSystemStatus();
+        // Pull user-created personas from the voice backend into the carousel.
+        void companionStore.syncWithBackend();
+        void companiesStore.initialize();
 
-        // Face tracking drift simulator
-        faceTrackerInterval = setInterval(() => {
-            if (isCameraOverride) {
-                faceTrackerX = 40 + Math.random() * 20;
-                faceTrackerY = 35 + Math.random() * 20;
-                faceTrackerScale = 0.95 + Math.random() * 0.1;
-                faceTrackerWidth = 70 + Math.round(Math.random() * 20);
-                faceTrackerHeight = 70 + Math.round(Math.random() * 20);
-            }
-        }, 1500);
+        // Setup initial matrix canvas
+        let ctx: CanvasRenderingContext2D | null = null;
+        let yPositions: number[] = [];
+        let width = 0; let height = 0;
 
-        // Matrix rain animation
         if (matrixCanvas) {
-            const ctx = matrixCanvas.getContext('2d');
+            ctx = matrixCanvas.getContext('2d');
             if (ctx) {
-                const width = matrixCanvas.width = matrixCanvas.offsetWidth || 300;
-                const height = matrixCanvas.height = matrixCanvas.offsetHeight || 400;
+                width = matrixCanvas.width = matrixCanvas.offsetWidth || 300;
+                height = matrixCanvas.height = matrixCanvas.offsetHeight || 400;
                 const columns = Math.floor(width / 12);
-                const yPositions = Array(columns).fill(0);
-                
-                matrixInterval = setInterval(() => {
-                    if (!matrixCanvas) return;
+                yPositions = Array(columns).fill(0);
+            }
+        }
+
+        const masterLoop = (timestamp: number) => {
+            if (timestamp - masterAnimLastTimes.matrix > 50) {
+                if (ctx && matrixCanvas) {
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
                     ctx.fillRect(0, 0, width, height);
-                    
                     ctx.fillStyle = `hsla(${orbHue}, 90%, 45%, 0.7)`;
                     ctx.font = '8px monospace';
-                    
                     for (let i = 0; i < yPositions.length; i++) {
                         const char = Math.random() > 0.5 ? '1' : '0';
-                        const x = i * 12;
-                        const y = yPositions[i];
-                        ctx.fillText(char, x, y);
-                        
+                        ctx.fillText(char, i * 12, yPositions[i]);
                         const threshold = companionStore.isThinking ? 0.96 : 0.99;
-                        if (y > height && Math.random() > threshold) {
+                        if (yPositions[i] > height && Math.random() > threshold) {
                             yPositions[i] = 0;
                         } else {
                             yPositions[i] += 10;
                         }
                     }
-                }, 50);
+                }
+                masterAnimLastTimes.matrix = timestamp;
             }
-        }
 
-        focusInterval = setInterval(fetchWorkspaceFocus, 5000);
+            if (timestamp - masterAnimLastTimes.pulse > 100) {
+                if (companionStore.isThinking) {
+                    orbScale = 1.15 + Math.random() * 0.15;
+                    orbHue = 270 + Math.random() * 40; 
+                    const r1 = 35 + Math.random() * 30;
+                    const r2 = 35 + Math.random() * 30;
+                    const r3 = 35 + Math.random() * 30;
+                    const r4 = 35 + Math.random() * 30;
+
+                } else if (isListening) {
+                    orbScale = 1.0 + (currentVolume * 0.8) + Math.random() * 0.05;
+                    orbHue = 140; 
+                    const v = Math.round(currentVolume * 25);
+                    const r1 = 50 - v;
+                    const r2 = 50 + v;
+
+                } else if (companionStore.isPlayingAudio) {
+                    orbScale = 1.0 + (currentVolume * 0.9) + Math.random() * 0.05;
+                    orbHue = 35 + Math.random() * 15; 
+                    const v = Math.round(currentVolume * 35);
+                    const r1 = 50 - v;
+                    const r2 = 50 + v;
+
+                } else {
+                    orbScale = 1.0 + Math.sin(Date.now() / 1000) * 0.05;
+                    orbHue = 200; 
+
+                }
+                masterAnimLastTimes.pulse = timestamp;
+            }
+
+            if (timestamp - masterAnimLastTimes.stats > 200) {
+                updateStats();
+                masterAnimLastTimes.stats = timestamp;
+            }
+
+            if (timestamp - masterAnimLastTimes.face > 1500) {
+                if (isCameraOverride) {
+                    faceTrackerX = 40 + Math.random() * 20;
+                    faceTrackerY = 35 + Math.random() * 20;
+                    faceTrackerScale = 0.95 + Math.random() * 0.1;
+                    faceTrackerWidth = 70 + Math.round(Math.random() * 20);
+                    faceTrackerHeight = 70 + Math.round(Math.random() * 20);
+                }
+                masterAnimLastTimes.face = timestamp;
+            }
+
+            if (timestamp - masterAnimLastTimes.status > 2000) {
+                fetchSystemStatus();
+                masterAnimLastTimes.status = timestamp;
+            }
+
+            if (timestamp - masterAnimLastTimes.focus > 5000) {
+                fetchWorkspaceFocus();
+                masterAnimLastTimes.focus = timestamp;
+            }
+
+            masterAnimFrame = requestAnimationFrame(masterLoop);
+        };
+
+        fetchSystemStatus();
         fetchWorkspaceFocus();
-
-        $effect(() => {
-            // Safe access defaults are now handled by activePersona
-        });
-
-        pulseInterval = setInterval(() => {
-            if (companionStore.isThinking) {
-                orbScale = 1.15 + Math.random() * 0.15;
-                orbHue = 270 + Math.random() * 40; 
-                const r1 = 35 + Math.random() * 30;
-                const r2 = 35 + Math.random() * 30;
-                const r3 = 35 + Math.random() * 30;
-                const r4 = 35 + Math.random() * 30;
-                orbBorderRadius = `${r1}% ${100-r1}% ${r2}% ${100-r2}% / ${r3}% ${r4}% ${100-r4}% ${100-r3}%`;
-            } else if (isListening) {
-                orbScale = 1.0 + (currentVolume * 0.8) + Math.random() * 0.05;
-                orbHue = 140; 
-                const v = Math.round(currentVolume * 25);
-                const r1 = 50 - v;
-                const r2 = 50 + v;
-                orbBorderRadius = `${r2}% ${r1}% ${r2}% ${r1}% / ${r1}% ${r2}% ${r1}% ${r2}%`;
-            } else if (companionStore.isPlayingAudio) {
-                orbScale = 1.0 + (currentVolume * 0.9) + Math.random() * 0.05;
-                orbHue = 35 + Math.random() * 15; 
-                const v = Math.round(currentVolume * 35);
-                const r1 = 50 - v;
-                const r2 = 50 + v;
-                orbBorderRadius = `${r1}% ${r2}% ${r1}% ${r2}% / ${r2}% ${r1}% ${r2}% ${r1}%`;
-            } else {
-                orbScale = 1.0 + Math.sin(Date.now() / 1000) * 0.05;
-                orbHue = 200; 
-                orbBorderRadius = '50%';
-            }
-        }, 100);
+        masterAnimFrame = requestAnimationFrame(masterLoop);
     });
 
     onMount(() => { setTimeout(initParticles, 100); });
 
     onDestroy(() => {
-        clearInterval(statsInterval);
-        clearInterval(statusInterval);
         cancelAnimationFrame(reqAnimFrame);
         cancelAnimationFrame(particleAnimFrame);
+        cancelAnimationFrame(masterAnimFrame);
         if (typewriterInterval) clearInterval(typewriterInterval);
-        if (pulseInterval) clearInterval(pulseInterval);
-        if (matrixInterval) clearInterval(matrixInterval);
-        if (faceTrackerInterval) clearInterval(faceTrackerInterval);
-        if (focusInterval) clearInterval(focusInterval);
         if (vadSilenceTimer) clearTimeout(vadSilenceTimer);
         if (switchGlitchTimer) clearTimeout(switchGlitchTimer);
 
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+
+        if (vadInstance) { vadInstance.destroy(); vadInstance = null; }
+        if (sttWs) { try { sttWs.close(); } catch(_) {} sttWs = null; }
         companionStore.stopSpeaking();
         if (videoStream) videoStream.getTracks().forEach(track => track.stop());
     });
 </script>
 
-<svelte:window onmousemove={() => companionStore.initAudio()} onclick={() => companionStore.initAudio()} />
+<svelte:window onmousemove={() => companionStore.initAudio()} onclick={() => companionStore.initAudio()} onkeydown={handleGlobalKeydown} />
 
 {#if companionStore.isOpen}
-    <div
-        class="absolute inset-0 z-[40] mc-root text-foreground font-sans flex flex-col p-4 select-none overflow-hidden"
-        style="--pc-h:{activeColor[0]};--pc-s:{activeColor[1]}%;--pc-l:{activeColor[2]}%"
-        transition:fade={{duration: 200}}
-    >
-        <!-- Ambient persona glow -->
+    {#if isPipMode}
+        <!-- PIP DRAGGABLE WINDOW -->
+        <div class="fixed z-[10000] w-[320px] aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-primary/50 flex flex-col cursor-move"
+             style="left:{pipX}px; top:{pipY}px; --pc-h:{activeColor[0]};--pc-s:{activeColor[1]}%;--pc-l:{activeColor[2]}%; border-color:hsl(var(--pc-h),var(--pc-s),var(--pc-l),0.5)"
+             transition:fade={{duration: 200}}
+             onmousedown={handlePipDragStart}
+             ontouchstart={handlePipDragStart}
+             role="dialog"
+             aria-label="Companion PIP"
+        >
+            {#if companionStore.activePersona?.idleVideoUrl || companionStore.activePersona?.videoUrl}
+                <video
+                    src={companionStore.activePersona?.idleVideoUrl || companionStore.activePersona?.videoUrl}
+                    loop muted playsinline autoplay
+                    class="w-full h-full object-cover pointer-events-none"
+                ></video>
+            {:else if companionStore.activePersona?.avatarUrl}
+                <img src={companionStore.activePersona?.avatarUrl} alt={companionStore.activePersona?.name} class="w-full h-full object-cover pointer-events-none" />
+            {:else}
+                <div class="w-full h-full bg-muted flex items-center justify-center font-black text-4xl text-muted-foreground pointer-events-none">
+                    {companionStore.activePersona?.name?.[0] || '?'}
+                </div>
+            {/if}
+
+            <div class="absolute bottom-2 left-2 flex items-center gap-2">
+                <div class="w-2 h-2 rounded-full {companionStore.isThinking ? 'bg-purple-500 animate-pulse' : isListening ? 'bg-green-400 animate-pulse' : companionStore.isPlayingAudio ? 'bg-amber-400 animate-ping' : 'bg-primary'}"></div>
+                <span class="text-[9px] font-mono font-bold text-white uppercase drop-shadow-md">{companionStore.activePersona?.name || 'SYSTEM'}</span>
+            </div>
+
+            <Button variant="ghost" size="icon" class="absolute top-2 right-2 h-6 w-6 bg-black/40 hover:bg-black/80 text-white rounded-md z-10" onclick={togglePipMode} onmousedown={(e) => e.stopPropagation()}>
+                <Eye class="h-3 w-3" />
+            </Button>
+        </div>
+    {:else}
+        <!-- FULL SCREEN OVERLAY -->
+        <div
+            class="absolute inset-0 z-[40] mc-root text-foreground font-sans flex flex-col p-4 select-none overflow-hidden"
+            style="--pc-h:{activeColor[0]};--pc-s:{activeColor[1]}%;--pc-l:{activeColor[2]}%"
+            transition:fade={{duration: 200}}
+        >
+            <!-- Ambient persona glow -->
         <div class="mc-ambient-glow {companionStore.isThinking ? 'mc-glow-active' : companionStore.isPlayingAudio ? 'mc-glow-speak' : ''}"
              style="background: radial-gradient(ellipse 60% 50% at 30% 60%, hsl(var(--pc-h),var(--pc-s),var(--pc-l),0.07) 0%, transparent 70%)"
         ></div>
@@ -910,6 +1181,12 @@
                     <span class="w-1 h-1 rounded-full bg-current {companionStore.isThinking ? 'animate-ping' : 'animate-pulse'}"></span>
                     {companionStore.isThinking ? 'PROCESSING' : companionStore.isPlayingAudio ? 'TRANSMITTING' : 'ONLINE'}
                 </div>
+                <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground rounded-lg" title="Toggle PIP Mode" onclick={togglePipMode}>
+                    <Eye class="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground rounded-lg" title="Persona Studio" onclick={() => { personaStudioMode = 'edit'; isPersonaStudioOpen = true; }}>
+                    <BrainCircuit class="h-3.5 w-3.5" />
+                </Button>
                 <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground rounded-lg" onclick={() => isSettingsOpen = true}>
                     <Settings class="h-3.5 w-3.5" />
                 </Button>
@@ -921,24 +1198,70 @@
 
         <div class="flex-1 flex flex-col gap-3 min-h-0 z-10 overflow-hidden relative pt-2">
             
+            <!-- TOOL EXECUTION HUD -->
+            {#if companionStore.activeToolCall}
+                <div class="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none" in:fly={{y: -20, duration: 300}} out:fade>
+                    <div class="bg-black/80 backdrop-blur-md border border-primary/40 rounded-xl px-4 py-2 flex items-center gap-3 shadow-[0_0_20px_rgba(var(--pc-h),var(--pc-s),var(--pc-l),0.2)]"
+                         style="border-color:hsl(var(--pc-h),var(--pc-s),var(--pc-l),0.5)">
+                        <div class="relative w-5 h-5 flex items-center justify-center">
+                            {#if companionStore.activeToolCall.status === 'running'}
+                                <div class="absolute inset-0 rounded-full border-2 border-primary/20 border-t-primary animate-spin" style="border-top-color:hsl(var(--pc-h),var(--pc-s),var(--pc-l))"></div>
+                                <Zap class="w-2.5 h-2.5" style="color:hsl(var(--pc-h),var(--pc-s),var(--pc-l))" />
+                            {:else if companionStore.activeToolCall.status === 'completed'}
+                                <svg class="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                            {:else}
+                                <AlertTriangle class="w-4 h-4 text-destructive" />
+                            {/if}
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[9px] font-mono font-bold uppercase tracking-widest leading-none" style="color:hsl(var(--pc-h),var(--pc-s),var(--pc-l))">
+                                {companionStore.activeToolCall.status === 'running' ? 'EXECUTING TOOL' : companionStore.activeToolCall.status === 'completed' ? 'TOOL COMPLETE' : 'TOOL FAILED'}
+                            </span>
+                            <span class="text-xs font-mono text-white mt-0.5">
+                                {companionStore.activeToolCall.name}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            {/if}
+
             <!-- TEAM CAROUSEL -->
             <div class="mc-carousel shrink-0">
-                {#each personas as persona}
-                    <button
-                        class="mc-carousel-item {companionStore.activePersonaId === persona.id ? 'mc-carousel-item--active' : ''}"
-                        onclick={() => companionStore.activePersonaId = persona.id}
-                        title={persona.name}
-                    >
-                        {#if persona.videoUrl}
-                            <video src={persona.videoUrl} autoplay loop muted playsinline class="w-full h-full object-cover rounded-xl pointer-events-none"></video>
-                        {:else}
-                            <img src={persona.avatarUrl} alt={persona.name} class="w-full h-full object-cover rounded-xl" />
-                        {/if}
-                        {#if companionStore.activePersonaId === persona.id}
-                            <div class="mc-carousel-label">{persona.name.split(' ')[0]}</div>
-                        {/if}
-                    </button>
-                {/each}
+                {#if companiesStore.activeCompany}
+                    {#each companiesStore.activeCompany.employeeIds.map(id => companionStore.personaList.find(p => p.id === id)).filter(Boolean) as persona (persona?.id)}
+                        <button
+                            class="mc-carousel-item {companionStore.activePersonaId === persona?.id ? 'mc-carousel-item--active' : ''}"
+                            onclick={() => { companionStore.setActivePersona(persona?.id); SFX.playClick(); }}
+                            title={persona?.name}
+                        >
+                            {#if persona?.videoUrl}
+                                <video 
+                                    src={persona?.videoUrl} 
+                                    loop muted playsinline 
+                                    preload="metadata"
+                                    use:carouselVideo={companionStore.activePersonaId === persona?.id}
+                                    class="w-full h-full object-cover rounded-xl pointer-events-none"
+                                ></video>
+                            {:else if persona?.avatarUrl}
+                                <img src={persona?.avatarUrl} alt={persona?.name} class="w-full h-full object-cover rounded-xl" />
+                            {:else}
+                                <div class="w-full h-full rounded-xl flex items-center justify-center bg-muted/40 text-lg font-black text-muted-foreground">
+                                    {persona?.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                                </div>
+                            {/if}
+                            {#if companionStore.activePersonaId === persona?.id}
+                                <div class="mc-carousel-label">{persona?.name.split(' ')[0]}</div>
+                            {/if}
+                        </button>
+                    {/each}
+                {/if}
+                <button
+                    class="mc-carousel-item flex items-center justify-center border-2 border-dashed border-border/50 hover:border-primary/60 text-muted-foreground hover:text-primary transition-colors"
+                    title="Recruit new team member"
+                    onclick={() => { personaStudioMode = 'create'; isPersonaStudioOpen = true; }}
+                >
+                    <Plus class="h-6 w-6" />
+                </button>
             </div>
 
             <!-- MAIN GRID LAYOUT -->
@@ -1468,6 +1791,8 @@
         
     </div>
 
+    <PersonaStudio bind:open={isPersonaStudioOpen} mode={personaStudioMode} />
+
     {#if isSettingsOpen}
         <div class="fixed inset-0 z-[10000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" transition:fade={{duration: 150}}>
             <div class="bg-card w-full max-w-lg border border-border shadow-2xl p-6 flex flex-col gap-6 rounded-3xl" transition:scale={{ start: 0.95, duration: 150 }}>
@@ -1512,6 +1837,75 @@
                         </div>
                     </div>
                     
+                    <div class="border-t border-border/60 pt-4 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <Label class="text-xs uppercase text-primary font-bold tracking-wider">Voice Backend // Jarvis Pipeline</Label>
+                            <span class="text-[9px] font-mono uppercase px-2 py-0.5 rounded-full border {companionStore.backendConnected ? 'text-green-400 border-green-400/30' : 'text-muted-foreground border-border/40'}">
+                                {companionStore.backendConnected ? 'LINKED' : 'OFFLINE'}
+                            </span>
+                        </div>
+                        {#if backendSettings}
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/10 p-4 rounded-2xl border border-border/40">
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                                        <span>End-of-speech silence</span>
+                                        <span class="text-primary font-bold">{backendSettings.min_silence_ms}ms</span>
+                                    </div>
+                                    <input type="range" min="250" max="1500" step="50" bind:value={backendSettings.min_silence_ms} class="w-full accent-primary h-1.5" />
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                                        <span>Silence after full sentence</span>
+                                        <span class="text-primary font-bold">{backendSettings.min_silence_complete_ms}ms</span>
+                                    </div>
+                                    <input type="range" min="150" max="1000" step="50" bind:value={backendSettings.min_silence_complete_ms} class="w-full accent-primary h-1.5" />
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                                        <span>Speculative generation delay</span>
+                                        <span class="text-primary font-bold">{backendSettings.speculative_silence_ms}ms</span>
+                                    </div>
+                                    <input type="range" min="100" max="500" step="20" bind:value={backendSettings.speculative_silence_ms} class="w-full accent-primary h-1.5" />
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                                        <span>Barge-in sensitivity</span>
+                                        <span class="text-primary font-bold">{Number(backendSettings.interrupt_threshold).toFixed(2)}</span>
+                                    </div>
+                                    <input type="range" min="0.5" max="0.95" step="0.05" bind:value={backendSettings.interrupt_threshold} class="w-full accent-primary h-1.5" />
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                                        <span>Follow-up window (no wake word)</span>
+                                        <span class="text-primary font-bold">{backendSettings.follow_up_window_s}s</span>
+                                    </div>
+                                    <input type="range" min="0" max="30" step="1" bind:value={backendSettings.follow_up_window_s} class="w-full accent-primary h-1.5" />
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                                        <span>Parallel TTS streams</span>
+                                        <span class="text-primary font-bold">{backendSettings.tts_parallel}</span>
+                                    </div>
+                                    <input type="range" min="1" max="4" step="1" bind:value={backendSettings.tts_parallel} class="w-full accent-primary h-1.5" />
+                                </div>
+                                <label class="flex items-center gap-2 cursor-pointer select-none md:col-span-2">
+                                    <input type="checkbox" bind:checked={backendSettings.wake_enabled} class="w-4 h-4 rounded border-border accent-primary" />
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-foreground">Always-on wake word listening</span>
+                                </label>
+                                {#if companionStore.backendLatency}
+                                    <div class="md:col-span-2 text-[9px] font-mono text-muted-foreground border-t border-border/20 pt-2">
+                                        LAST TURN: {Math.round(companionStore.backendLatency.speech_end_to_first_audio_ms)}ms speech-to-voice
+                                        // {Math.round(companionStore.backendLatency.transcript_to_first_token_ms)}ms to first token
+                                    </div>
+                                {/if}
+                            </div>
+                        {:else}
+                            <div class="text-[9px] text-muted-foreground font-mono uppercase bg-muted/10 border border-dashed border-border/40 rounded-2xl p-4">
+                                Voice backend not detected at 127.0.0.1:8765. Start it with `jarvis` to configure the always-on voice pipeline.
+                            </div>
+                        {/if}
+                    </div>
+
                     <div class="border-t border-border/60 pt-4 space-y-4">
                         <Label class="text-xs uppercase text-primary font-bold tracking-wider">Autonomous Operations</Label>
                         
@@ -1581,7 +1975,9 @@
                 
                 <div class="flex justify-end pt-4 border-t border-border gap-3">
                     <Button variant="outline" class="rounded-xl" onclick={() => isSettingsOpen = false}>Cancel</Button>
-                    <Button class="rounded-xl uppercase tracking-wider font-bold text-xs" onclick={() => { companionStore.saveSettings(); isSettingsOpen = false; }}>Save Parameters</Button>
+                    <Button class="rounded-xl uppercase tracking-wider font-bold text-xs" disabled={backendSettingsSaving} onclick={async () => { companionStore.saveSettings(); await saveBackendSettings(); isSettingsOpen = false; }}>
+                        {backendSettingsSaving ? 'Saving...' : 'Save Parameters'}
+                    </Button>
                 </div>
                 
             </div>
@@ -1601,6 +1997,7 @@
     </div>
 {/if}
 
+{/if}
 <style>
     /* ---- Scrollbar: persona-tinted thin scrollbar in terminal ---- */
     .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -1828,15 +2225,7 @@
         border-radius: 1rem;
         margin: 0.5rem;
     }
-    .mc-stat-bar {
-        width: 100%; height: 3px;
-        background: color-mix(in srgb, var(--muted) 80%, transparent);
-        border-radius: 9999px; overflow: hidden;
-    }
-    .mc-stat-fill {
-        height: 100%; border-radius: 9999px;
-        transition: width 0.4s ease;
-    }
+
     .mc-protocol-row {
         display: flex; align-items: center; justify-content: space-between;
         padding: 0.35rem 0.5rem;
@@ -1921,15 +2310,6 @@
         backdrop-filter: blur(8px);
     }
 
-    /* ---- Terminal panel ---- */
-    .mc-terminal-panel {
-        border: 1px solid hsl(var(--pc-h) var(--pc-s) var(--pc-l) / 0.18);
-        transition: border-color 0.5s;
-    }
-    .mc-terminal-panel:focus-within {
-        border-color: hsl(var(--pc-h) var(--pc-s) var(--pc-l) / 0.35);
-        box-shadow: 0 0 20px hsl(var(--pc-h) var(--pc-s) var(--pc-l) / 0.06);
-    }
 
     /* ---- Command bar ---- */
     .mc-cmd-bar {
@@ -1950,71 +2330,9 @@
         overflow: hidden;
         flex-shrink: 0;
     }
-    .mc-mic-btn {
-        width: 2.5rem; height: 2.5rem;
-        flex-shrink: 0; border-radius: 0.75rem;
-        transition: all 0.3s;
-    }
-    .mc-mic-btn--active {
-        background: #22c55e !important;
-        color: white !important;
-        border-color: transparent !important;
-        box-shadow: 0 0 16px #22c55e60 !important;
-        animation: micPulse 1s ease-in-out infinite;
-    }
-    .mc-mic-btn--busy {
-        background: color-mix(in srgb, var(--muted) 60%, transparent);
-        animation: micPulse 2s ease-in-out infinite;
-    }
-    @keyframes micPulse { 0%,100% { box-shadow: 0 0 8px currentColor; } 50% { box-shadow: 0 0 20px currentColor; } }
-    .mc-cmd-input {
-        width: 100%;
-        min-height: 2.5rem; max-height: 7rem;
-        padding: 0.5rem 0.75rem;
-        background: color-mix(in srgb, var(--background) 70%, transparent);
-        border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-        border-radius: 0.75rem;
-        font-size: 0.8rem;
-        font-family: monospace; letter-spacing: 0.02em;
-        color: var(--foreground);
-        resize: none;
-        outline: none;
-        transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .mc-cmd-input::placeholder {
-        color: var(--muted-foreground); opacity: 0.5;
-        text-transform: uppercase; font-size: 0.7rem;
-        letter-spacing: 0.08em;
-    }
-    .mc-cmd-input:focus {
-        border-color: hsl(var(--pc-h) var(--pc-s) var(--pc-l) / 0.5);
-        box-shadow: 0 0 0 2px hsl(var(--pc-h) var(--pc-s) var(--pc-l) / 0.12);
-    }
-    .mc-send-btn {
-        width: 2.5rem; height: 2.5rem;
-        flex-shrink: 0; border-radius: 0.75rem;
-        transition: box-shadow 0.2s;
-    }
-    .mc-send-btn:not([disabled]):hover {
-        box-shadow: 0 0 14px hsl(var(--pc-h) var(--pc-s) var(--pc-l) / 0.45);
-    }
 
-    /* ---- Glitch ---- */
-    @keyframes hudGlitch {
-        0%   { clip-path: inset(40% 0 61% 0); transform: skew(0.3deg); }
-        20%  { clip-path: inset(92% 0 1% 0);  transform: skew(-0.5deg); }
-        40%  { clip-path: inset(15% 0 80% 0); transform: skew(0.8deg); }
-        60%  { clip-path: inset(80% 0 5% 0);  transform: skew(-0.3deg); }
-        80%  { clip-path: inset(3% 0 92% 0);  transform: skew(0.5deg); }
-        100% { clip-path: inset(40% 0 61% 0); transform: skew(0deg); }
-    }
-    .hud-glitched {
-        animation: hudGlitch 0.25s linear infinite;
-        filter: hue-rotate(90deg) saturate(1.5);
-    }
-    @keyframes scanLaser {
-        0% { top: 0%; } 50% { top: 100%; } 100% { top: 0%; }
-    }
+
+
 
     /* ---- Persona card glitch transition ---- */
     @keyframes cardGlitch {
@@ -2078,6 +2396,10 @@
         top: 0;
         animation: scanLaser 3s linear infinite;
         pointer-events: none;
+    }
+    @keyframes scanLaser {
+        0%   { top: 0; }
+        100% { top: 100%; }
     }
 
     /* Face lock box */

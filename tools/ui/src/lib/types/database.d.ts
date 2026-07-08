@@ -6,6 +6,15 @@ export interface McpServerOverride {
 	enabled: boolean;
 }
 
+export interface DatabaseCompany {
+	id: string;
+	name: string;
+	description: string;
+	logo?: string;
+	themeColor?: string;
+	employeeIds: string[];
+}
+
 export interface DatabaseConversation {
 	currNode: string | null;
 	id: string;
